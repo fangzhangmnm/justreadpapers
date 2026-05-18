@@ -286,6 +286,28 @@ body {
 }
 .auth-row button:hover { background: var(--accent-soft); }
 
+.view-controls {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.vc-button {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vc-button:hover { background: var(--bg-3); }
+.vc-button svg { width: 16px; height: 16px; }
+
 .drawer-actions {
   display: flex;
   gap: 6px;

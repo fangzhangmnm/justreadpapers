@@ -15,7 +15,7 @@ const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
 // fallback CDN
 const PDFJS_BASE_FB = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}`;
 
-const ZOOM_KEY = "jrp.zoom";
+const ZOOM_KEY_PREFIX = "jrp.zoom:";  // per-doc 缩放比率,key 后接 docId
 const SPREAD_KEY = "jrp.spread";  // "0" (none) | "1" (odd: 单封面后 2+3...) | "2" (even: 1+2, 3+4...)
 
 let pdfjsLib = null;
@@ -57,16 +57,26 @@ function computeCozyScale() {
   }
 }
 
-// 显式 "fit-width":让 pdf.js 自己按当前容器宽度算 scale(会响应窗口 resize)
-export function fitToWidth() {
+// 内部 cozy 应用 —— pagesinit / spread toggle / fit-width button 都走它
+function applyAutoFit() {
   if (!viewer) return;
   programmaticScale = true;
-  viewer.currentScaleValue = "page-width";
+  const s = computeCozyScale();
+  if (s != null) viewer.currentScale = s;
+  else viewer.currentScaleValue = "page-width";
   programmaticScale = false;
-  try { localStorage.removeItem(ZOOM_KEY); } catch (_) {}
 }
 
-// 按比例 zoom in / out。factor > 1 放大,< 1 缩小。scalechanging 会自动存 localStorage。
+// 显式 fit-width 按钮:清掉本论文的 per-doc 保存值 + auto-fit 重新算一次
+export function fitToWidth() {
+  if (!viewer) return;
+  if (currentDocId) {
+    try { localStorage.removeItem(ZOOM_KEY_PREFIX + currentDocId); } catch (_) {}
+  }
+  applyAutoFit();
+}
+
+// 按比例 zoom in / out。scalechanging 会自动存 per-doc localStorage。
 export function zoomBy(factor) {
   if (!viewer) return;
   const cur = viewer.currentScale || 1;
@@ -75,16 +85,19 @@ export function zoomBy(factor) {
 }
 
 // Spread mode: 0=单页,1=封面单页+后续双页(odd),2=全程双页(even)。
-// 切换后保留 reading-line 位置。
+// 切换后:auto-fit 重新算(因为渲染宽度变了,旧 scale 没意义了),并保留 reading-line。
 export function setSpreadMode(mode) {
   if (!viewer) return;
   const pos = currentPosition();
   viewer.spreadMode = mode;
   try { localStorage.setItem(SPREAD_KEY, String(mode)); } catch (_) {}
-  // pdf.js 异步 re-layout,延一帧再 restore
-  if (pos) {
-    requestAnimationFrame(() => requestAnimationFrame(() => restorePosition(pos)));
-  }
+  // pdf.js 异步 re-layout → 下一帧 auto-fit + 再下一帧 restore
+  requestAnimationFrame(() => {
+    applyAutoFit();
+    requestAnimationFrame(() => {
+      if (pos) restorePosition(pos);
+    });
+  });
 }
 
 export function getSpreadMode() {
@@ -191,22 +204,24 @@ export async function initViewer({ containerEl, onPosition, onPagePeek: opp }) {
   linkService.setViewer(viewer);
 
   eventBus.on("pagesinit", () => {
-    // 应用上次的 fit/zoom (device-local);没有就按 A4 cozy 算
-    const saved = localStorage.getItem(ZOOM_KEY);
-    if (saved) {
-      viewer.currentScaleValue = saved;
-    } else {
-      const s = computeCozyScale();
-      programmaticScale = true;
-      if (s != null) viewer.currentScale = s;
-      else viewer.currentScaleValue = "page-width";
-      programmaticScale = false;
-    }
-    // 应用上次的 spread mode (device-local)
+    // 应用上次的 spread mode (device-local,跨论文共享)
     const savedSpread = localStorage.getItem(SPREAD_KEY);
     if (savedSpread != null) {
       const n = parseInt(savedSpread, 10);
       if (n === 0 || n === 1 || n === 2) viewer.spreadMode = n;
+    }
+    // 应用 per-paper zoom:
+    //   - 这篇论文之前在本设备调整过 → 用上次的
+    //   - 没调整过 → cozy auto-fit (= "auto fit-width on new paper" 的语义)
+    const savedZoom = currentDocId
+      ? localStorage.getItem(ZOOM_KEY_PREFIX + currentDocId)
+      : null;
+    if (savedZoom) {
+      programmaticScale = true;
+      viewer.currentScaleValue = savedZoom;
+      programmaticScale = false;
+    } else {
+      applyAutoFit();
     }
     // pages 都 init 完了,如果有 pendingRestore 立刻执行
     if (pendingRestore) {
@@ -225,17 +240,17 @@ export async function initViewer({ containerEl, onPosition, onPagePeek: opp }) {
     }
   });
 
-  // 用户改了 zoom → 保存。programmaticScale 期间(我们自己设的 cozy 默认值)不存,
-  // 这样浏览器尺寸 / 屏幕变了下次会重新算 cozy。
+  // 用户改了 zoom → 保存到 per-doc key。programmaticScale 期间不存(避免
+  // cozy 默认值被持久化,这样换设备 / 切 spread 时还能重新 auto-fit)。
   eventBus.on("scalechanging", (evt) => {
     if (programmaticScale) return;
+    if (!currentDocId) return;
     try {
       const val = viewer.currentScaleValue;
-      if (typeof val === "string" && isNaN(parseFloat(val))) {
-        localStorage.setItem(ZOOM_KEY, val);
-      } else {
-        localStorage.setItem(ZOOM_KEY, String(evt.scale));
-      }
+      const out = (typeof val === "string" && isNaN(parseFloat(val)))
+        ? val
+        : String(evt.scale);
+      localStorage.setItem(ZOOM_KEY_PREFIX + currentDocId, out);
     } catch (_) {}
   });
 
