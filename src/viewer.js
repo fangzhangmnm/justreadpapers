@@ -293,7 +293,10 @@ export function restorePosition({ pageIndex, yFraction }) {
   return true;
 }
 
-// 取当前 reading-line 落在哪页 / 哪 yFraction
+// 取当前 reading-line 落在哪页 / 哪 yFraction。
+// 关键:teardown / reload 期间 pages 高度可能全 0,**不要**瞎猜成"文档末"
+// (那会覆盖 session.json,刷新后跳到末页)。统统返回 null,
+// 让 caller 跳过这次报告。
 export function currentPosition() {
   if (!viewer || !container) return null;
   const pages = viewer.pagesCount;
@@ -309,9 +312,7 @@ export function currentPosition() {
       return { pageIndex: i, yFraction: (readingLineY - top) / h };
     }
   }
-  // 兜底
-  if (readingLineY < 0) return { pageIndex: 0, yFraction: 0 };
-  return { pageIndex: pages - 1, yFraction: 1 };
+  return null;
 }
 
 export function teardownCurrent() {
