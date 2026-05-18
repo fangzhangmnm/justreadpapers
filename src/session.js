@@ -25,7 +25,7 @@ import {
   encodeApprootPath,
 } from "./graph.js";
 import { getToken } from "./auth.js";
-import { SESSION_FILE, POSITION_DEBOUNCE_MS } from "./config.js";
+import { SESSION_FILE, POSITION_DEBOUNCE_MS, POSITION_HEARTBEAT_MS } from "./config.js";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
@@ -36,6 +36,7 @@ function emptyState() {
 let state = emptyState();
 let knownETag = null; // last server eTag we've seen (after read or successful write)
 let dirty = false;
+let firstDirtyAt = 0; // 用于 debounce-with-ceiling:即使一直在脏,也保证 HEARTBEAT 后强推
 let writeTimer = null;
 let writeInFlight = null; // Promise of current PUT,避免重叠 PUT
 let listeners = new Set();
@@ -149,11 +150,20 @@ export function getPosition(itemId) {
 
 function scheduleWrite(delay = POSITION_DEBOUNCE_MS) {
   dirty = true;
+  if (firstDirtyAt === 0) firstDirtyAt = Date.now();
   if (writeTimer) clearTimeout(writeTimer);
+  const now = Date.now();
+  // debounce: 每次脏 → 重置 delay 倒计时
+  // 但封顶 firstDirtyAt + HEARTBEAT,避免一直脏导致永不 push
+  // delay=0 (lastActive / forgetDoc) 走立即,不受 ceiling 影响
+  const target = delay === 0
+    ? now
+    : Math.min(now + delay, firstDirtyAt + POSITION_HEARTBEAT_MS);
+  const wait = Math.max(0, target - now);
   writeTimer = setTimeout(() => {
     writeTimer = null;
     flush().catch((e) => console.warn("session flush failed:", e));
-  }, delay);
+  }, wait);
 }
 
 // 强制写盘。返回 Promise。
@@ -168,6 +178,8 @@ export async function flush() {
 
   // 把 dirty 标记移交给当前这次 PUT —— 期间又脏了的话,标记会被 setPosition 重置成 true
   dirty = false;
+  const ceilingMarkAtSnapshot = firstDirtyAt;
+  firstDirtyAt = 0;  // 提前 reset,这样 PUT 期间又脏会重新起 ceiling 起点
   const snapshot = structuredClone(state);
   const eTagAtSnapshot = knownETag;
 
@@ -180,8 +192,9 @@ export async function flush() {
         // 远端被另一设备改了 —— merge + retry 一次
         await mergeRemoteAndRetry(snapshot);
       } else {
-        // 网络 / 5xx → 标 dirty 让下次再试
+        // 网络 / 5xx → 标 dirty 让下次再试,ceiling 起点恢复
         dirty = true;
+        if (firstDirtyAt === 0) firstDirtyAt = ceilingMarkAtSnapshot || Date.now();
         throw e;
       }
     }

@@ -29,7 +29,7 @@ let pendingRestore = null;
 let scrollHandler = null;
 let onPositionChange = null;
 let saveTimer = null;
-let saveDelayMs = 800;
+let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
 // 目标 CSS 渲染宽度:在大屏上不撑满,按 A4 ~96 px/inch 的阅读宽度。

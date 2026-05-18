@@ -15,8 +15,13 @@ export const PAPERS_FOLDER = "papers";
 export const TRASH_FOLDER = "trash";
 export const SESSION_FILE = "session.json";
 
-// 位置写盘 debounce:停下 / 切后台 / 关页才 PUT,不要每帧
-export const POSITION_DEBOUNCE_MS = 1500;
+// 位置写盘的两层节流(抄 webxiaoheiwu 的 debounce-with-ceiling):
+//   每次 setPosition 重置 DEBOUNCE 倒计时,但封顶 firstDirty + HEARTBEAT。
+// 读论文比打字频率低很多,所以静默期 / 封顶都比 webxiaoheiwu (15s/30s) 长。
+// 关键的兜底:visibilitychange-hidden / beforeunload 各 flushKeepalive 一次,
+//   保证切 tab / 关 app 时立即 PUT,不靠 ceiling。
+export const POSITION_DEBOUNCE_MS = 5000;
+export const POSITION_HEARTBEAT_MS = 30000;
 
 // IndexedDB LRU cap。论文 PDF 一般 1-5MB,1GB 可以放 200-1000 篇。
 export const CACHE_CAP_BYTES = 1024 * 1024 * 1024;
