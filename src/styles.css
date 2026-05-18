@@ -105,35 +105,32 @@ body {
   background: var(--bg-0);
   /* PDF.js 需要 container.position 是 absolute / relative */
   scrollbar-width: auto;
-  scrollbar-color: var(--accent-strong) transparent;
+  scrollbar-color: var(--accent-strong) var(--bg-1);
 }
-.viewer-container::-webkit-scrollbar { width: 14px; height: 14px; }
-.viewer-container::-webkit-scrollbar-track { background: transparent; }
+/* 滚动条:18px 全宽实心 (touch / Quest 控制器够大才点得中,desktop 也方便快速拖) */
+.viewer-container::-webkit-scrollbar { width: 18px; height: 18px; }
+.viewer-container::-webkit-scrollbar-track { background: var(--bg-1); }
 .viewer-container::-webkit-scrollbar-thumb {
   background: var(--accent-strong);
-  border-radius: 7px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
+  border-radius: 9px;
 }
-.viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
-.viewer-container::-webkit-scrollbar-corner { background: transparent; }
+.viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.viewer-container::-webkit-scrollbar-thumb:active { background: var(--accent); }
+.viewer-container::-webkit-scrollbar-corner { background: var(--bg-1); }
 
-/* Drawer / outline 里面的列表也跟上主题,同样的粗细方便点 */
+/* Drawer / outline 列表用同样规格 */
 .doc-list, .outline-list {
   scrollbar-width: auto;
-  scrollbar-color: var(--accent-strong) transparent;
+  scrollbar-color: var(--accent-strong) var(--bg-1);
 }
-.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 14px; }
-.doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: transparent; }
+.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 18px; }
+.doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: var(--bg-1); }
 .doc-list::-webkit-scrollbar-thumb, .outline-list::-webkit-scrollbar-thumb {
   background: var(--accent-strong);
-  border-radius: 7px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
+  border-radius: 9px;
 }
 .doc-list::-webkit-scrollbar-thumb:hover, .outline-list::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-  background-clip: padding-box;
 }
 
 /* pdf.js 的 .pdfViewer 内部布局 */
@@ -141,14 +138,107 @@ body {
   padding: 8px 0 80px;   /* viewer 已经在顶栏下面,这里只留一点呼吸 */
 }
 
+/* viewer 隐藏(进入概览模式时) */
+.viewer-container.hidden { display: none; }
+
+/* 缩略图概览(全屏覆盖,从顶栏下沿到底) */
+.thumb-container {
+  position: absolute;
+  top: calc(36px + env(safe-area-inset-top, 0px));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: auto;
+  background: var(--bg-0);
+  padding: 16px;
+  scrollbar-width: auto;
+  scrollbar-color: var(--accent-strong) transparent;
+}
+.thumb-container.hidden { display: none; }
+.thumb-container::-webkit-scrollbar { width: 14px; }
+.thumb-container::-webkit-scrollbar-thumb {
+  background: var(--accent-strong);
+  border-radius: 7px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+/* PPT-式 grid:auto-fill,大屏多列,窄屏少列。最大宽度 1800px,4K 大屏不至于过密 */
+#thumbnailViewer.pdfThumbnailViewer {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(180px, 28vw), 1fr));
+  gap: 16px;
+  max-width: 1800px;
+  margin: 0 auto;
+  /* 覆盖 pdf.js 默认的 flex 布局 */
+  padding: 0;
+  list-style: none;
+}
+
+/* 每个缩略图 */
+#thumbnailViewer .thumbnail {
+  width: auto !important;
+  margin: 0 !important;
+  padding: 4px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#thumbnailViewer .thumbnail a {
+  display: block;
+  width: 100%;
+}
+#thumbnailViewer .thumbnailSelectionRing {
+  border: 2px solid var(--line-strong) !important;
+  border-radius: 4px;
+  padding: 4px !important;
+  width: 100% !important;
+  height: auto !important;
+  box-sizing: border-box;
+  background: var(--bg-1);
+}
+#thumbnailViewer .thumbnail:hover .thumbnailSelectionRing {
+  border-color: var(--accent-strong) !important;
+}
+#thumbnailViewer .thumbnail.selected .thumbnailSelectionRing {
+  border-color: var(--accent) !important;
+  border-width: 3px !important;
+}
+#thumbnailViewer .thumbnail canvas {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto !important;
+}
+
 /* 中键拖拽平移时的视觉 (默认光标交给 pdf.js text-layer 的 cursor:text) */
 .viewer-container.panning,
 .viewer-container.panning * { cursor: grabbing !important; user-select: none; }
 
+/* 单页模式:每个 .page 是一张 card */
 #viewer.pdfViewer .page {
   margin: 8px auto;
   border: 1px solid var(--line);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* 双页(spread)模式:pdf.js 把两页包在 .spread 里。card 升到 .spread,
+   两页内部去边、去阴影、贴在一起像一本翻开的书 */
+#viewer.pdfViewer .spread {
+  margin: 8px auto;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  display: inline-flex;
+  background: var(--bg-1);  /* 极少数 PDF 页面背景透明时兜底 */
+}
+#viewer.pdfViewer .spread .page {
+  margin: 0 !important;
+  border: 0;
+  box-shadow: none;
+}
+/* 双页之间留一根淡淡的"书脊"线 */
+#viewer.pdfViewer .spread .page + .page {
+  border-left: 1px solid var(--line);
 }
 
 /* ── Top bar (实心窄条,实占空间) ─────────────────────────────── */

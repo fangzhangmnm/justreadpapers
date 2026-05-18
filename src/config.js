@@ -26,8 +26,11 @@ export const POSITION_HEARTBEAT_MS = 30_000;
 // 鼠标滚轮粒度下,半页 (0.5) 才算"真换了段"。换页(pageIndex 不同)永远 non-trivial。
 export const TRIVIAL_POSITION_Y_DELTA = 0.5;
 
-// IndexedDB LRU cap。论文 PDF 一般 1-5MB,1GB 可以放 200-1000 篇。
-export const CACHE_CAP_BYTES = 1024 * 1024 * 1024;
+// IndexedDB cap。论文 PDF 一般 1-5MB,250MB 可以放 50-250 篇。
+// 淘汰用 frecency (recency × frequency):每次访问把 effective lastUsed 往未来推
+// USE_BONUS_MS,这样常读的论文哪怕一阵没读也比"路过看一眼就再没碰过"的优先级高。
+export const CACHE_CAP_BYTES = 250 * 1024 * 1024;
+export const CACHE_USE_BONUS_MS = 24 * 60 * 60 * 1000;  // 每次访问 = 24h 的新鲜度奖励
 
 // reading-line 在 viewport 内的固定锚位置 [0,1]。spec 推荐 0.25。
 export const READING_LINE_ANCHOR = 0.25;

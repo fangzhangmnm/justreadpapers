@@ -21,6 +21,9 @@ const SPREAD_KEY = "jrp.spread";  // "0" (none) | "1" (odd: 单封面后 2+3...)
 let pdfjsLib = null;
 let pdfViewerNs = null;
 let viewer = null;
+let thumbViewer = null;
+let renderingQueue = null;
+let thumbContainer = null;
 let linkService = null;
 let eventBus = null;
 let container = null;
@@ -118,6 +121,40 @@ export function getSpreadMode() {
   return viewer?.spreadMode ?? 0;
 }
 
+// 概览模式开 / 关。打开时主 viewer 隐藏,缩略图占满 surface;关闭反之。
+// 不 destroy 任何 viewer instance,只切换可见性 + 渲染优先级。
+let overviewOn = false;
+export function setOverviewVisible(visible) {
+  if (!thumbViewer || !thumbContainer || !container) return;
+  if (visible === overviewOn) return;
+  overviewOn = !!visible;
+  if (overviewOn) {
+    // 让 thumb viewer 跟主 viewer 当前页对齐,打开就看见自己在哪
+    const cur = viewer.currentPageNumber || 1;
+    thumbContainer.classList.remove("hidden");
+    container.classList.add("hidden");
+    renderingQueue.isThumbnailViewEnabled = true;
+    // 滚到当前页,延一帧等 layout
+    requestAnimationFrame(() => {
+      try { thumbViewer.scrollThumbnailIntoView(cur); } catch (_) {}
+    });
+  } else {
+    thumbContainer.classList.add("hidden");
+    container.classList.remove("hidden");
+    renderingQueue.isThumbnailViewEnabled = false;
+  }
+}
+
+export function isOverviewVisible() {
+  return overviewOn;
+}
+
+// 程序化跳到某一页 (1-based)。从缩略图点击进来,会先用这个跳主 viewer
+export function goToPage(pageNumber) {
+  if (!viewer) return;
+  viewer.currentPageNumber = pageNumber;
+}
+
 function setupMousePan(c) {
   let isDown = false;
   let startX = 0, startY = 0;
@@ -186,9 +223,10 @@ async function ensureLib() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}/build/pdf.worker.mjs`;
 }
 
-export async function initViewer({ containerEl, onPosition, onPagePeek: opp }) {
+export async function initViewer({ containerEl, thumbContainerEl, onPosition, onPagePeek: opp }) {
   await ensureLib();
   container = containerEl;
+  thumbContainer = thumbContainerEl || null;
   onPositionChange = onPosition;
   onPagePeek = opp || null;
 
@@ -208,14 +246,28 @@ export async function initViewer({ containerEl, onPosition, onPagePeek: opp }) {
 
   eventBus = new pdfViewerNs.EventBus();
   linkService = new pdfViewerNs.PDFLinkService({ eventBus });
+  // 渲染队列:让 main viewer 跟 thumbnail viewer 共享一个调度器,根据"哪个在前"决定优先级
+  renderingQueue = new pdfViewerNs.PDFRenderingQueue();
   viewer = new pdfViewerNs.PDFViewer({
     container,
     eventBus,
     linkService,
-    // 连续垂直滚动模式
-    // (默认就是,但显式写出更清楚)
+    renderingQueue,
   });
+  renderingQueue.setViewer(viewer);
   linkService.setViewer(viewer);
+
+  if (thumbContainer) {
+    thumbViewer = new pdfViewerNs.PDFThumbnailViewer({
+      container: thumbContainer,
+      eventBus,
+      linkService,
+      renderingQueue,
+    });
+    renderingQueue.setThumbnailViewer(thumbViewer);
+    // 默认主 viewer 在前
+    renderingQueue.isThumbnailViewEnabled = false;
+  }
 
   eventBus.on("pagesinit", () => {
     // 应用上次的 spread mode (device-local,跨论文共享)
@@ -333,6 +385,7 @@ export async function loadPdf({ docId, data, position }) {
   currentPdf = await loadingTask.promise;
   viewer.setDocument(currentPdf);
   linkService.setDocument(currentPdf);
+  if (thumbViewer) thumbViewer.setDocument(currentPdf);
   return currentPdf;
 }
 
@@ -417,6 +470,7 @@ export function teardownCurrent() {
     currentPdf = null;
   }
   if (viewer) viewer.setDocument(null);
+  if (thumbViewer) thumbViewer.setDocument(null);
   currentDocId = null;
   pendingRestore = null;
 }

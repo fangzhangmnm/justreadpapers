@@ -37,6 +37,11 @@
         <div id="viewer" class="pdfViewer"></div>
       </div>
 
+      <!-- 缩略图概览(全屏覆盖,默认隐藏)。pdf.js 接管 #thumbnailViewer -->
+      <div id="thumbContainer" class="thumb-container hidden">
+        <div id="thumbnailViewer" class="pdfThumbnailViewer"></div>
+      </div>
+
       <!-- 落地空态(没登录 / 没论文 / 加载失败) -->
       <div id="emptyLanding" class="empty-landing hidden" aria-live="polite">
         <div class="title" id="emptyTitle">还没有论文</div>
@@ -155,6 +160,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="8" height="14" rx="1"></rect>
             <rect x="13" y="5" width="8" height="14" rx="1"></rect>
+          </svg>
+        </button>
+        <button class="vc-button" id="overviewButton" type="button" aria-label="缩略图概览" title="缩略图概览(全部页面)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
           </svg>
         </button>
       </div>

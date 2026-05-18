@@ -23,6 +23,7 @@ import {
   initViewer, loadPdf, restorePosition, currentPosition,
   teardownCurrent, getPdfMetadata, getOutline, jumpToDest, fitToWidth,
   setSpreadMode, getSpreadMode, zoomBy,
+  setOverviewVisible, isOverviewVisible, goToPage,
 } from "./viewer.js";
 import {
   PAPERS_FOLDER, TRASH_FOLDER,
@@ -32,6 +33,8 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const viewerContainer = $("viewerContainer");
+const thumbContainer = $("thumbContainer");
+const overviewButton = $("overviewButton");
 const emptyLanding = $("emptyLanding");
 const emptyTitle = $("emptyTitle");
 const emptyHint = $("emptyHint");
@@ -885,6 +888,35 @@ spreadButton.addEventListener("click", () => {
   setSpreadMode(cur === 0 ? 2 : 0);
 });
 
+overviewButton.addEventListener("click", () => {
+  setOverviewVisible(!isOverviewVisible());
+});
+
+// Esc 退出概览
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && isOverviewVisible()) {
+    setOverviewVisible(false);
+  }
+});
+
+// 在缩略图上点击 → 主 viewer 跳到对应页 + 退出概览 + 立刻 flush (明确意图)
+thumbContainer.addEventListener("click", (e) => {
+  // pdf.js 的缩略图 anchor 上自带 data-page-number(每个 .thumbnail 容器)
+  const thumb = e.target.closest(".thumbnail");
+  if (!thumb) return;
+  const pn = parseInt(thumb.dataset.pageNumber, 10);
+  if (!pn || isNaN(pn)) return;
+  e.preventDefault();
+  goToPage(pn);
+  setOverviewVisible(false);
+  // 跳页是明确意图,等 scroll 沉淀 + setPosition 报告 → 立刻 push
+  if (outlineJumpFlushTimer) clearTimeout(outlineJumpFlushTimer);
+  outlineJumpFlushTimer = setTimeout(() => {
+    outlineJumpFlushTimer = null;
+    flush().catch(() => {});
+  }, 800);
+});
+
 drawerSortButton.addEventListener("click", async () => {
   sortMode = sortMode === "modified" ? "name" : "modified";
   localStorage.setItem(SORT_KEY, sortMode);
@@ -1026,6 +1058,7 @@ async function main() {
   // 现在主要是为了启动期不重复加载 pdf.js
   await initViewer({
     containerEl: viewerContainer,
+    thumbContainerEl: thumbContainer,
     onPosition: onPositionFromViewer,
     onPagePeek: onPagePeekFromViewer,
   });
