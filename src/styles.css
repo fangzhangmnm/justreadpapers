@@ -163,15 +163,15 @@ body {
   background-clip: padding-box;
 }
 
-/* 自己 roll 的缩略图 grid */
-#thumbContainer {
+/* 自己 roll 的缩略图 grid。
+   ⚠ 用 class 而不是 #id —— 否则 specificity 比 .thumb-container.hidden 高,
+      永远 display:grid,会覆盖在 viewer 上变成"黑屏" (night 模式 bg-0 = 黑)。 */
+.thumb-container {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(180px, 28vw), 1fr));
   gap: 16px;
   align-content: start;
 }
-/* 内容居中 cap 在 1800px,4K 大屏左右留白 */
-#thumbContainer > * { grid-column: span 1; }
 .thumb-container > .thumb-card { max-width: 100%; }
 
 .thumb-card {
