@@ -94,9 +94,13 @@ body {
   overflow: hidden;
 }
 
+/* viewer 物理上从 "top-bar + 安全区" 下方开始,不靠 padding-top 兜底压顶栏 */
 .viewer-container {
   position: absolute;
-  inset: 0;
+  top: calc(24px + env(safe-area-inset-top, 0px));
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: auto;
   background: var(--bg-0);
   /* PDF.js 需要 container.position 是 absolute / relative */
@@ -104,7 +108,7 @@ body {
 
 /* pdf.js 的 .pdfViewer 内部布局 */
 #viewer.pdfViewer {
-  padding: 32px 0 80px;   /* top 让出实心顶栏(24px) + 一点呼吸 */
+  padding: 8px 0 80px;   /* viewer 已经在顶栏下面,这里只留一点呼吸 */
 }
 
 /* 中键拖拽平移时的视觉 (默认光标交给 pdf.js text-layer 的 cursor:text) */
@@ -125,10 +129,13 @@ body {
   left: 0;
   right: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end;  /* icons 贴底,让出 safe-area-top */
   gap: 6px;
-  padding: 0 6px;
-  height: 24px;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: max(6px, env(safe-area-inset-left, 0px));
+  padding-right: max(6px, env(safe-area-inset-right, 0px));
+  padding-bottom: 0;
+  min-height: calc(24px + env(safe-area-inset-top, 0px));
   background: var(--bg-1);
   border-bottom: 1px solid var(--line-strong);
   z-index: 5;
@@ -201,6 +208,10 @@ body {
   flex-direction: column;
   transform: translateX(0);
   transition: transform 200ms ease;
+  /* iOS notch / Android cutout 安全区 */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .drawer.hidden { transform: translateX(-100%); }
 
@@ -474,7 +485,7 @@ body {
 /* Loading 进度条 (PDF 还在下载时,贴在顶栏下沿) */
 .progress-bar {
   position: fixed;
-  top: 24px;
+  top: calc(24px + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   height: 2px;

@@ -21,7 +21,8 @@ import {
 import * as cache from "./cache.js";
 import {
   initViewer, loadPdf, restorePosition, currentPosition,
-  teardownCurrent, getPdfMetadata, getOutline, jumpToDest,
+  teardownCurrent, getPdfMetadata, getOutline, jumpToDest, fitToWidth,
+  setSpreadMode, getSpreadMode, zoomBy,
 } from "./viewer.js";
 import {
   PAPERS_FOLDER, TRASH_FOLDER,
@@ -40,6 +41,10 @@ const progressFill = $("progressFill");
 const topBar = $("topBar");
 const menuButton = $("menuButton");
 const outlineButton = $("outlineButton");
+const fitWidthButton = $("fitWidthButton");
+const spreadButton = $("spreadButton");
+const zoomInButton = $("zoomInButton");
+const zoomOutButton = $("zoomOutButton");
 const currentTitle = $("currentTitle");
 const pageStatus = $("pageStatus");
 const syncStatus = $("syncStatus");
@@ -835,6 +840,15 @@ outlineButton.addEventListener("click", () => toggleDrawer("outline"));
 drawerCloseButton.addEventListener("click", closeDrawer);
 outlineCloseButton.addEventListener("click", closeDrawer);
 drawerBackdrop.addEventListener("click", closeDrawer);
+
+fitWidthButton.addEventListener("click", fitToWidth);
+zoomInButton.addEventListener("click", () => zoomBy(1.15));
+zoomOutButton.addEventListener("click", () => zoomBy(1 / 1.15));
+spreadButton.addEventListener("click", () => {
+  // 单页 ↔ 全程双页(even),不引入 odd 那个变体(对论文用处不大)
+  const cur = getSpreadMode();
+  setSpreadMode(cur === 0 ? 2 : 0);
+});
 
 drawerSortButton.addEventListener("click", async () => {
   sortMode = sortMode === "modified" ? "name" : "modified";

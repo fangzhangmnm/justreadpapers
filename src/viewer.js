@@ -16,6 +16,7 @@ const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
 const PDFJS_BASE_FB = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}`;
 
 const ZOOM_KEY = "jrp.zoom";
+const SPREAD_KEY = "jrp.spread";  // "0" (none) | "1" (odd: 单封面后 2+3...) | "2" (even: 1+2, 3+4...)
 
 let pdfjsLib = null;
 let pdfViewerNs = null;
@@ -32,8 +33,8 @@ let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
-// 目标 CSS 渲染宽度:在大屏上不撑满,按 A4 ~96 px/inch 的阅读宽度。
-// 移动 / 窄屏上回退到 page-width (页面比 800 还窄就让 pdf.js 撑满)。
+// 目标 CSS 渲染宽度:大屏上不撑满,窄屏(Quest / 手机 / 横向论文)允许真的缩到很小。
+// 下限 0.1 不是 0.5 —— Quest viewport 比 naturalCssWidth 还窄时,0.5 会让页面溢出半边。
 const TARGET_CSS_WIDTH = 900;
 function computeCozyScale() {
   try {
@@ -48,10 +49,44 @@ function computeCozyScale() {
     const targetCss = Math.min(TARGET_CSS_WIDTH, availCss);
     if (targetCss <= 0) return null;
     const s = targetCss / naturalCssWidth;
-    return Math.max(0.5, Math.min(3, s));
+    return Math.max(0.1, Math.min(4, s));
   } catch (_) {
     return null;
   }
+}
+
+// 显式 "fit-width":让 pdf.js 自己按当前容器宽度算 scale(会响应窗口 resize)
+export function fitToWidth() {
+  if (!viewer) return;
+  programmaticScale = true;
+  viewer.currentScaleValue = "page-width";
+  programmaticScale = false;
+  try { localStorage.removeItem(ZOOM_KEY); } catch (_) {}
+}
+
+// 按比例 zoom in / out。factor > 1 放大,< 1 缩小。scalechanging 会自动存 localStorage。
+export function zoomBy(factor) {
+  if (!viewer) return;
+  const cur = viewer.currentScale || 1;
+  const next = Math.max(0.1, Math.min(8, cur * factor));
+  viewer.currentScale = next;
+}
+
+// Spread mode: 0=单页,1=封面单页+后续双页(odd),2=全程双页(even)。
+// 切换后保留 reading-line 位置。
+export function setSpreadMode(mode) {
+  if (!viewer) return;
+  const pos = currentPosition();
+  viewer.spreadMode = mode;
+  try { localStorage.setItem(SPREAD_KEY, String(mode)); } catch (_) {}
+  // pdf.js 异步 re-layout,延一帧再 restore
+  if (pos) {
+    requestAnimationFrame(() => requestAnimationFrame(() => restorePosition(pos)));
+  }
+}
+
+export function getSpreadMode() {
+  return viewer?.spreadMode ?? 0;
 }
 
 function setupMousePan(c) {
@@ -127,6 +162,20 @@ export async function initViewer({ containerEl, onPosition }) {
   container = containerEl;
   onPositionChange = onPosition;
 
+  // 设备 / 容器维度日志 —— Quest / 高分屏 / 大屏调试用
+  try {
+    console.log("[viewer] init", {
+      dpr: window.devicePixelRatio,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      screenWidth: screen.width,
+      screenHeight: screen.height,
+      containerClientWidth: container.clientWidth,
+      containerClientHeight: container.clientHeight,
+      ua: navigator.userAgent,
+    });
+  } catch (_) {}
+
   eventBus = new pdfViewerNs.EventBus();
   linkService = new pdfViewerNs.PDFLinkService({ eventBus });
   viewer = new pdfViewerNs.PDFViewer({
@@ -149,6 +198,12 @@ export async function initViewer({ containerEl, onPosition }) {
       if (s != null) viewer.currentScale = s;
       else viewer.currentScaleValue = "page-width";
       programmaticScale = false;
+    }
+    // 应用上次的 spread mode (device-local)
+    const savedSpread = localStorage.getItem(SPREAD_KEY);
+    if (savedSpread != null) {
+      const n = parseInt(savedSpread, 10);
+      if (n === 0 || n === 1 || n === 2) viewer.spreadMode = n;
     }
     // pages 都 init 完了,如果有 pendingRestore 立刻执行
     if (pendingRestore) {
