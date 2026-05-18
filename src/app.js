@@ -644,25 +644,46 @@ async function uploadFiles(files) {
   }
 }
 
-// 决定上传文件的目标名:优先 PDF metadata Title,fallback 到原文件名(去后缀)
+// 决定上传文件的目标名:
+//   优先 PDF metadata Title (经过 cleanTitle + 质量门),
+//   不靠谱就 fallback 到原文件名(去后缀)
+//
+// 为什么需要质量门:LaTeX 工具链(dvipdfm 等)经常把 /Title 写成 "superspace4.dvi"
+// 这种源文件名;Word 导出的会带 "Microsoft Word - " 前缀;有些是 "Untitled" / 空。
 async function deriveFileName(file) {
+  let title = "";
   try {
-    // 用 pdf.js 临时打开,只为读 metadata.Title
-    // (不进 viewer,不渲染)
     const buf = await file.arrayBuffer();
-    // 临时 import 一次 pdfjs;通常已经被 viewer 预加载过
     const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs");
     pdfjs.GlobalWorkerOptions.workerSrc =
       "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
     const doc = await pdfjs.getDocument({ data: buf }).promise;
     const meta = await doc.getMetadata();
-    const title = (meta?.info?.Title || "").trim();
+    title = cleanPdfTitle(meta?.info?.Title || "");
     doc.destroy();
-    if (title) return title;
   } catch (e) {
     console.warn("PDF metadata 读失败,fallback 到原名", e);
   }
+  if (isUsableTitle(title)) return title;
   return file.name.replace(/\.pdf$/i, "");
+}
+
+function cleanPdfTitle(raw) {
+  let t = String(raw || "").trim();
+  // 剥掉 Word 导出的前缀:"Microsoft Word - actual_title.docx"
+  t = t.replace(/^Microsoft Word\s*-\s*/i, "");
+  // 剥掉 LaTeX / Word / InDesign / TeX 工具链留下的源文件扩展名
+  t = t.replace(/\.(dvi|tex|ps|docx?|indd|pdf|aux|toc|out|fdb_latexmk)$/i, "");
+  return t.trim();
+}
+
+function isUsableTitle(t) {
+  if (!t) return false;
+  if (t.length < 5) return false;                  // 太短大概率不是标题
+  if (/^untitled\b/i.test(t)) return false;        // "Untitled" / "Untitled-1"
+  // 没空格 + 有点 = 看起来像个文件名 / arxiv id,不要
+  if (!/\s/.test(t) && /\./.test(t)) return false;
+  return true;
 }
 
 // ── 启动序列 (the jumpscare) ─────────────────────────────────────────────
