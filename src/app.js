@@ -575,6 +575,8 @@ function buildOutlineItem(node, depth) {
       }
       row.classList.add("active");
       jumpToDest(node.dest);
+      // 跳转是明确意图,等 viewer scroll 沉淀 + setPosition 报告 → 立刻 push,不等 debounce
+      setTimeout(() => { flush().catch(() => {}); }, 800);
     }
   });
   li.appendChild(row);
@@ -812,6 +814,11 @@ document.addEventListener("visibilitychange", () => {
     flush().catch(() => {});
     flushKeepalive();
   }
+});
+// pagehide 在移动 / iOS 上比 beforeunload 更可靠
+window.addEventListener("pagehide", () => {
+  flush().catch(() => {});
+  flushKeepalive();
 });
 window.addEventListener("focus", reconcileOnFocus);
 

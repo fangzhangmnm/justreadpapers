@@ -15,18 +15,16 @@ export const PAPERS_FOLDER = "papers";
 export const TRASH_FOLDER = "trash";
 export const SESSION_FILE = "session.json";
 
-// 位置写盘的两层节流(抄 webxiaoheiwu 的 debounce-with-ceiling):
-//   每次 setPosition 重置 DEBOUNCE 倒计时,但封顶 firstDirty + HEARTBEAT。
-// 读论文跟写小说不一样:阅读时的"心跳"(yFraction 从 0.42 → 0.46)对跨设备恢复
-// 没意义,但会污染 OneDrive 版本历史 / 活动 feed。
-// 兜底:visibilitychange-hidden / beforeunload 各 flushKeepalive 一次,
-//   保证切 tab / 关 app 时连同 "trivial" 的微动一起推。
-export const POSITION_DEBOUNCE_MS = 10000;
-export const POSITION_HEARTBEAT_MS = 60000;
+// 位置写盘节流(简单方案):
+//   - 每次 non-trivial scroll 重置 10s 倒计时,期满 → push
+//   - 持续活动也封顶 30s(连按 PageDown 时 rate 不会更高)
+//   - trivial(同页 + |yFrac Δ| < 0.5)只更新内存,不调度
+// 兜底:visibilitychange-hidden / pagehide / beforeunload 都 flushKeepalive 一次。
+export const POSITION_DEBOUNCE_MS = 10_000;
+export const POSITION_HEARTBEAT_MS = 30_000;
 
-// 同页内 yFraction 抖动小于这个值 = "trivial",只更新内存,不调度 PUT。
-// 换页(pageIndex 不同)永远算 non-trivial,正常调度。
-export const TRIVIAL_POSITION_Y_DELTA = 0.05;
+// 鼠标滚轮粒度下,半页 (0.5) 才算"真换了段"。换页(pageIndex 不同)永远 non-trivial。
+export const TRIVIAL_POSITION_Y_DELTA = 0.5;
 
 // IndexedDB LRU cap。论文 PDF 一般 1-5MB,1GB 可以放 200-1000 篇。
 export const CACHE_CAP_BYTES = 1024 * 1024 * 1024;

@@ -2,7 +2,11 @@
 //   { lastActive: itemId | null, docs: { itemId: { position: {pageIndex,yFraction}, addedAt } } }
 //
 // 设计原则:
-//  - 内存里的 state 是单一来源,UI 直接读它。写盘是 debounce 后的副作用。
+//  - 内存里的 state 是单一来源,UI 直接读它。
+//  - 写盘 = "debounce + ceiling":每次 non-trivial setPosition 重置 10s,
+//    期满 push;从 firstDirty 起 30s 封顶,持续活动也不超过这个 rate。
+//  - trivial(同页 + |yFrac Δ| < 0.5) 跟"上次成功推到 OneDrive 的位置"比 →
+//    只更新内存,不调度。这条专门吃掉鼠标 fidget / loitering。
 //  - 写盘用 If-Match (eTag) 检测冲突。412 → re-fetch + merge + retry。
 //  - merge 策略:remote 当 base,把本地"活跃 doc"的位置 + lastActive 盖上去
 //    (这是用户当下正在读的、最新的真实状态)。其它 doc 的 position 取 remote。
