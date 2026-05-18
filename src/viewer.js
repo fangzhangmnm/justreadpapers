@@ -30,6 +30,74 @@ let scrollHandler = null;
 let onPositionChange = null;
 let saveTimer = null;
 let saveDelayMs = 800;
+let programmaticScale = false;
+
+// 目标 CSS 渲染宽度:在大屏上不撑满,按 A4 ~96 px/inch 的阅读宽度。
+// 移动 / 窄屏上回退到 page-width (页面比 800 还窄就让 pdf.js 撑满)。
+const TARGET_CSS_WIDTH = 900;
+function computeCozyScale() {
+  try {
+    const pv = viewer.getPageView(0);
+    if (!pv) return null;
+    // pv.viewport.width 是当前 scale 下的 CSS px 宽度;还原到 scale=1 的自然宽
+    const vp = pv.viewport;
+    if (!vp) return null;
+    const naturalCssWidth = vp.width / vp.scale;
+    // 容器宽度(扣掉一点 padding)
+    const availCss = container.clientWidth - 32;
+    const targetCss = Math.min(TARGET_CSS_WIDTH, availCss);
+    if (targetCss <= 0) return null;
+    const s = targetCss / naturalCssWidth;
+    return Math.max(0.5, Math.min(3, s));
+  } catch (_) {
+    return null;
+  }
+}
+
+function setupMousePan(c) {
+  let isDown = false;
+  let startX = 0, startY = 0;
+  let startScrollL = 0, startScrollT = 0;
+  let pointerId = -1;
+  let moved = false;
+  c.addEventListener("pointerdown", (e) => {
+    // 只接 primary 鼠标按键 + 鼠标设备 (touch / pen 走原生)
+    if (e.pointerType !== "mouse") return;
+    if (e.button !== 0) return;
+    isDown = true;
+    moved = false;
+    pointerId = e.pointerId;
+    startX = e.clientX; startY = e.clientY;
+    startScrollL = c.scrollLeft; startScrollT = c.scrollTop;
+    c.setPointerCapture(pointerId);
+    c.classList.add("panning");
+    // 阻止 PDF text-layer 触发文字选区(拖拽期间)
+    e.preventDefault();
+  });
+  c.addEventListener("pointermove", (e) => {
+    if (!isDown) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < 3) return;
+    moved = true;
+    c.scrollLeft = startScrollL - dx;
+    c.scrollTop = startScrollT - dy;
+  });
+  function release(e) {
+    if (!isDown) return;
+    isDown = false;
+    try { c.releasePointerCapture(pointerId); } catch (_) {}
+    c.classList.remove("panning");
+    // 如果有 mouse move,吃掉随后的 click,避免误触发链接 / text layer
+    if (moved) {
+      const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); c.removeEventListener("click", swallow, true); };
+      c.addEventListener("click", swallow, true);
+      setTimeout(() => c.removeEventListener("click", swallow, true), 0);
+    }
+  }
+  c.addEventListener("pointerup", release);
+  c.addEventListener("pointercancel", release);
+}
 
 async function loadModule(rel) {
   const urls = [`${PDFJS_BASE}/${rel}`, `${PDFJS_BASE_FB}/${rel}`];
@@ -70,9 +138,17 @@ export async function initViewer({ containerEl, onPosition }) {
   linkService.setViewer(viewer);
 
   eventBus.on("pagesinit", () => {
-    // 应用上次的 fit/zoom (device-local)
+    // 应用上次的 fit/zoom (device-local);没有就按 A4 cozy 算
     const saved = localStorage.getItem(ZOOM_KEY);
-    viewer.currentScaleValue = saved || "page-width";
+    if (saved) {
+      viewer.currentScaleValue = saved;
+    } else {
+      const s = computeCozyScale();
+      programmaticScale = true;
+      if (s != null) viewer.currentScale = s;
+      else viewer.currentScaleValue = "page-width";
+      programmaticScale = false;
+    }
     // pages 都 init 完了,如果有 pendingRestore 立刻执行
     if (pendingRestore) {
       const p = pendingRestore;
@@ -90,10 +166,11 @@ export async function initViewer({ containerEl, onPosition }) {
     }
   });
 
-  // 用户改了 zoom (Ctrl+wheel / 按钮) → 保存
+  // 用户改了 zoom → 保存。programmaticScale 期间(我们自己设的 cozy 默认值)不存,
+  // 这样浏览器尺寸 / 屏幕变了下次会重新算 cozy。
   eventBus.on("scalechanging", (evt) => {
+    if (programmaticScale) return;
     try {
-      // 优先存语义值(如 "page-width"),没就存数字
       const val = viewer.currentScaleValue;
       if (typeof val === "string" && isNaN(parseFloat(val))) {
         localStorage.setItem(ZOOM_KEY, val);
@@ -102,6 +179,21 @@ export async function initViewer({ containerEl, onPosition }) {
       }
     } catch (_) {}
   });
+
+  // Ctrl/Cmd + wheel = zoom。否则放过让原生 scroll 走。
+  container.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const dir = e.deltaY < 0 ? 1 : -1;
+    // 每个 notch 放大约 ~10%。围绕容器中心。
+    const factor = dir > 0 ? 1.1 : 1 / 1.1;
+    const cur = viewer.currentScale || 1;
+    const next = Math.max(0.2, Math.min(8, cur * factor));
+    viewer.currentScale = next;
+  }, { passive: false });
+
+  // 鼠标拖拽平移(touch 走原生 scroll 不动)
+  setupMousePan(container);
 
   scrollHandler = () => {
     // restore 期间不要回报 (防止覆盖即将恢复到的位置)

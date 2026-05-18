@@ -56,8 +56,13 @@ body {
 
 /* pdf.js 的 .pdfViewer 内部布局 */
 #viewer.pdfViewer {
-  padding: 12px 0 80px;   /* 顶上稍微留点,底部留空便于翻完 */
+  padding: 48px 0 80px;   /* top 让出顶栏空间,bottom 让出翻完末页的余量 */
 }
+
+/* 拖拽平移的鼠标视觉提示 */
+.viewer-container { cursor: grab; }
+.viewer-container.panning { cursor: grabbing; }
+.viewer-container.panning * { cursor: grabbing !important; user-select: none; }
 
 #viewer.pdfViewer .page {
   margin: 8px auto;
