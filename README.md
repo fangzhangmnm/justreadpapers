@@ -2,9 +2,9 @@
 
 > 输入 URL → 立刻回到上次那篇论文的那一页。
 
-PDF 论文阅读 PWA。OneDrive `approot` 沙盒做存储,session.json 是唯一 asset,PDF 是可丢弃 cache。
+**🔗 https://fangzhangmnm.github.io/justreadpapers/**
 
-部署目标:`https://fangzhangmnm.github.io/justreadpapers/`
+PDF 论文阅读 PWA。OneDrive `approot` 沙盒做存储,session.json 是唯一 asset,PDF 是可丢弃 cache。
 
 ## 当前 MVP 状态
 
