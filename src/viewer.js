@@ -61,9 +61,10 @@ function setupMousePan(c) {
   let pointerId = -1;
   let moved = false;
   c.addEventListener("pointerdown", (e) => {
-    // 只接 primary 鼠标按键 + 鼠标设备 (touch / pen 走原生)
+    // 只接中键(button=1)平移 —— 左键留给文本选区。
+    // touch / pen 走原生 scroll。
     if (e.pointerType !== "mouse") return;
-    if (e.button !== 0) return;
+    if (e.button !== 1) return;
     isDown = true;
     moved = false;
     pointerId = e.pointerId;
@@ -71,7 +72,7 @@ function setupMousePan(c) {
     startScrollL = c.scrollLeft; startScrollT = c.scrollTop;
     c.setPointerCapture(pointerId);
     c.classList.add("panning");
-    // 阻止 PDF text-layer 触发文字选区(拖拽期间)
+    // Windows / Linux 上中键按下默认进入 auto-scroll 模式,要 prevent
     e.preventDefault();
   });
   c.addEventListener("pointermove", (e) => {

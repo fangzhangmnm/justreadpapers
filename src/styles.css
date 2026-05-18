@@ -56,12 +56,11 @@ body {
 
 /* pdf.js 的 .pdfViewer 内部布局 */
 #viewer.pdfViewer {
-  padding: 48px 0 80px;   /* top 让出顶栏空间,bottom 让出翻完末页的余量 */
+  padding: 36px 0 80px;   /* top 让出实心顶栏(28px) + 一点呼吸 */
 }
 
-/* 拖拽平移的鼠标视觉提示 */
-.viewer-container { cursor: grab; }
-.viewer-container.panning { cursor: grabbing; }
+/* 中键拖拽平移时的视觉 (默认光标交给 pdf.js text-layer 的 cursor:text) */
+.viewer-container.panning,
 .viewer-container.panning * { cursor: grabbing !important; user-select: none; }
 
 #viewer.pdfViewer .page {
@@ -70,7 +69,7 @@ body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
-/* ── Top bar (悬浮在 viewer 之上) ─────────────────────────────── */
+/* ── Top bar (实心窄条,实占空间) ─────────────────────────────── */
 
 .top-bar {
   position: fixed;
@@ -80,17 +79,11 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  min-height: 32px;
-  background: linear-gradient(to bottom, rgba(241, 230, 207, 0.92), rgba(241, 230, 207, 0.7) 70%, transparent);
+  padding: 2px 8px;
+  min-height: 28px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
   z-index: 5;
-  pointer-events: none;  /* 默认不挡 PDF 点击;按钮单独 enable */
-}
-
-.top-bar button,
-.top-bar .status,
-.top-bar .title {
-  pointer-events: auto;
 }
 
 .icon-button {
@@ -129,17 +122,6 @@ body {
   gap: 6px;
 }
 .top-bar .status .sep { opacity: 0.4; }
-
-/* 自动隐藏:鼠标停在 top 区域才完全显示;移走稍微淡 */
-.top-bar.auto-hide {
-  opacity: 0.25;
-  transition: opacity 200ms ease;
-}
-.top-bar.auto-hide:hover,
-.top-bar.auto-hide:focus-within,
-.top-bar.show {
-  opacity: 1;
-}
 
 /* ── Drawer (file panel) ─────────────────────────────────────── */
 
@@ -394,10 +376,10 @@ body {
   margin: 0;
 }
 
-/* Loading 进度条 (PDF 还在下载时) */
+/* Loading 进度条 (PDF 还在下载时,贴在顶栏下沿) */
 .progress-bar {
   position: fixed;
-  top: 32px;
+  top: 28px;
   left: 0;
   right: 0;
   height: 2px;
