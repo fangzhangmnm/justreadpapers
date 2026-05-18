@@ -1,24 +1,72 @@
-/* 暖色 parchment 主题。沿 webxiaoheiwu 的色板,但 PDF 区域要给纸本身留白
-   (PDF 已经是白底了),所以 desk 颜色看 PDF 之间的间隙。 */
+/* Ivory-Platinum / Black-Gold 主题。
+   - 默认 = DAY (ivory-platinum)
+   - data-theme="night" 或 (data-theme="auto" + 系统暗色) → NIGHT (black-gold)
+   - 中性色一律暖偏,绝不纯黑 / 纯白
+   - 金 / 铂金只做 accent / 描边 / 大字号 + button 填充时配深色文字
+*/
 
 :root {
-  --bg-0: #d8c8a8;       /* desk: warm sand,看作 PDF 之间的桌面 */
-  --bg-1: #f1e6cf;       /* parchment paper(顶栏 / 抽屉) */
-  --bg-2: #e6d6b6;       /* hover */
-  --bg-3: #c9b48d;       /* divider */
-  --ink: #4a3520;
-  --ink-soft: #6f5538;
-  --ink-muted: #9a8462;
-  --accent: #a05826;
-  --accent-strong: #8a481e;
-  --accent-soft: rgba(160, 88, 38, 0.14);
-  --danger: #9d2e21;
-  --danger-soft: rgba(157, 46, 33, 0.12);
-  --line: rgba(58, 40, 24, 0.10);
-  --line-strong: rgba(58, 40, 24, 0.22);
+  /* DAY · 象牙白金 */
+  --bg-0:          #F6F4EF;                  /* canvas:暖象牙底 */
+  --bg-1:          #FFFFFF;                  /* surface:抽屉 / 顶栏 / 卡片 */
+  --bg-2:          #EFEDE6;                  /* hover */
+  --bg-3:          #E0D6BE;                  /* inset / 分隔 (= border.gold) */
+  --ink:           #2A2620;                  /* text.primary */
+  --ink-soft:      #6B6456;                  /* text.secondary */
+  --ink-muted:     #9A9382;                  /* dimmer */
+  --accent:        #B7B19F;                  /* accent.metal 铂金 */
+  --accent-strong: #8A8472;                  /* accent.deep   */
+  --accent-soft:   rgba(183, 177, 159, 0.18);
+  --on-accent:     #2A2620;                  /* accent 上面用的深色文字 */
+  --danger:        #9D3D2D;                  /* 暖偏砖红 */
+  --danger-soft:   rgba(157, 61, 45, 0.12);
+  --line:          #E8DFC9;                  /* hairline (champagne) */
+  --line-strong:   #E0D6BE;                  /* divider (= border.gold) */
+  --overlay:       rgba(42, 38, 32, 0.45);   /* idle / drop / backdrop 蒙层 */
 
   --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
     "Segoe UI", system-ui, sans-serif;
+}
+
+:root[data-theme="night"] {
+  /* NIGHT · 黑金 */
+  --bg-0:          #121110;
+  --bg-1:          #1C1B18;
+  --bg-2:          #232220;
+  --bg-3:          #33302A;
+  --ink:           #EDE7D6;
+  --ink-soft:      #9A9176;
+  --ink-muted:     #75705F;
+  --accent:        #C8A24C;                  /* antique gold */
+  --accent-strong: #B08828;
+  --accent-soft:   rgba(200, 162, 76, 0.18);
+  --on-accent:     #121110;
+  --danger:        #C26F5A;
+  --danger-soft:   rgba(194, 111, 90, 0.18);
+  --line:          #2A2823;
+  --line-strong:   #33302A;
+  --overlay:       rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] {
+    --bg-0:          #121110;
+    --bg-1:          #1C1B18;
+    --bg-2:          #232220;
+    --bg-3:          #33302A;
+    --ink:           #EDE7D6;
+    --ink-soft:      #9A9176;
+    --ink-muted:     #75705F;
+    --accent:        #C8A24C;
+    --accent-strong: #B08828;
+    --accent-soft:   rgba(200, 162, 76, 0.18);
+    --on-accent:     #121110;
+    --danger:        #C26F5A;
+    --danger-soft:   rgba(194, 111, 90, 0.18);
+    --line:          #2A2823;
+    --line-strong:   #33302A;
+    --overlay:       rgba(0, 0, 0, 0.55);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -56,7 +104,7 @@ body {
 
 /* pdf.js 的 .pdfViewer 内部布局 */
 #viewer.pdfViewer {
-  padding: 36px 0 80px;   /* top 让出实心顶栏(28px) + 一点呼吸 */
+  padding: 32px 0 80px;   /* top 让出实心顶栏(24px) + 一点呼吸 */
 }
 
 /* 中键拖拽平移时的视觉 (默认光标交给 pdf.js text-layer 的 cursor:text) */
@@ -78,22 +126,22 @@ body {
   right: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 8px;
-  min-height: 28px;
+  gap: 6px;
+  padding: 0 6px;
+  height: 24px;
   background: var(--bg-1);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
   z-index: 5;
 }
 
 .icon-button {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -101,11 +149,15 @@ body {
   transition: color 120ms ease, background 120ms ease;
 }
 .icon-button:hover { background: var(--bg-2); color: var(--ink); }
-.icon-button svg { width: 16px; height: 16px; }
+.icon-button svg { width: 14px; height: 14px; }
+
+/* drawer 里图标按钮可以稍大些(空间够) */
+.drawer-header .icon-button { width: 28px; height: 28px; }
+.drawer-header .icon-button svg { width: 16px; height: 16px; }
 
 .top-bar .title {
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: 11px;
   color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
@@ -115,11 +167,11 @@ body {
 
 .top-bar .status {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ink-muted);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .top-bar .status .sep { opacity: 0.4; }
 
@@ -128,7 +180,7 @@ body {
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(40, 28, 12, 0.36);
+  background: var(--overlay);
   z-index: 20;
   opacity: 1;
   transition: opacity 180ms ease;
@@ -313,6 +365,49 @@ body {
 .drawer-foot-button:hover { color: var(--ink); background: var(--bg-2); }
 .drawer-foot-button svg { width: 14px; height: 14px; }
 
+/* PDF outline drawer (跟 .drawer 共享样式,只是 list 显示密一些) */
+.outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  font-size: 13px;
+}
+.outline-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 5px 12px 5px 0;
+  cursor: pointer;
+  color: var(--ink);
+  border-left: 3px solid transparent;
+  line-height: 1.35;
+}
+.outline-item:hover { background: var(--bg-2); }
+.outline-item.active { border-left-color: var(--accent); background: var(--bg-2); }
+.outline-item .twisty {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
+  color: var(--ink-muted);
+  font-size: 10px;
+  user-select: none;
+}
+.outline-item .label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.outline-children.collapsed { display: none; }
+
 /* ── Toasts / overlays ───────────────────────────────────────── */
 
 .toast {
@@ -348,7 +443,7 @@ body {
 .idle-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(40, 28, 12, 0.45);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -379,7 +474,7 @@ body {
 /* Loading 进度条 (PDF 还在下载时,贴在顶栏下沿) */
 .progress-bar {
   position: fixed;
-  top: 28px;
+  top: 24px;
   left: 0;
   right: 0;
   height: 2px;
@@ -416,18 +511,18 @@ body {
   padding: 8px 14px;
   font-size: 13px;
   background: var(--accent);
-  color: #fff8ec;
+  color: var(--on-accent);
   border: 0;
   border-radius: 8px;
   cursor: pointer;
 }
-.empty-landing button:hover { background: var(--accent-strong); }
+.empty-landing button:hover { background: var(--accent-strong); color: var(--on-accent); }
 
 /* Drag-and-drop overlay */
 .drop-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(40, 28, 12, 0.5);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;

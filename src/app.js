@@ -21,7 +21,7 @@ import {
 import * as cache from "./cache.js";
 import {
   initViewer, loadPdf, restorePosition, currentPosition,
-  teardownCurrent, getPdfMetadata,
+  teardownCurrent, getPdfMetadata, getOutline, jumpToDest,
 } from "./viewer.js";
 import {
   PAPERS_FOLDER, TRASH_FOLDER,
@@ -39,6 +39,7 @@ const progressBar = $("progressBar");
 const progressFill = $("progressFill");
 const topBar = $("topBar");
 const menuButton = $("menuButton");
+const outlineButton = $("outlineButton");
 const currentTitle = $("currentTitle");
 const pageStatus = $("pageStatus");
 const syncStatus = $("syncStatus");
@@ -62,16 +63,23 @@ const emptyTrashButton = $("emptyTrashButton");
 const docList = $("docList");
 const docListEmpty = $("docListEmpty");
 const cacheStatsText = $("cacheStatsText");
+const themeButton = $("themeButton");
+const themeLabel = $("themeLabel");
 const updateToast = $("updateToast");
 const updateToastReload = $("updateToastReload");
 const updateToastDismiss = $("updateToastDismiss");
 const idleOverlay = $("idleOverlay");
 const dropOverlay = $("dropOverlay");
+const outlineDrawer = $("outlineDrawer");
+const outlineCloseButton = $("outlineCloseButton");
+const outlineList = $("outlineList");
+const outlineEmpty = $("outlineEmpty");
 
 // ── UI state ─────────────────────────────────────────────────────────────
 
 const SORT_KEY = "jrp.sort";       // "modified" | "name"
 const VIEW_KEY = "jrp.view";       // "papers" | "trash"
+const THEME_KEY = "jrp.theme";     // "day" | "night" | "auto"
 const IDLE_MS = 1000 * 60 * 30;    // 30min
 
 let sortMode = localStorage.getItem(SORT_KEY) || "modified";
@@ -143,17 +151,39 @@ function ensurePdfExt(name) {
   return /\.pdf$/i.test(name) ? name : `${name}.pdf`;
 }
 
-// ── Drawer 开关 ──────────────────────────────────────────────────────────
+// ── Drawer 开关 (mutex:同一时间只允许一个 drawer 开) ───────────────────
 
-function openDrawer() {
-  drawer.classList.remove("hidden");
-  drawer.setAttribute("aria-hidden", "false");
-  drawerBackdrop.classList.remove("hidden");
-}
+let openDrawerName = null; // "papers" | "outline" | null
+
 function closeDrawer() {
   drawer.classList.add("hidden");
   drawer.setAttribute("aria-hidden", "true");
+  outlineDrawer.classList.add("hidden");
+  outlineDrawer.setAttribute("aria-hidden", "true");
   drawerBackdrop.classList.add("hidden");
+  openDrawerName = null;
+}
+
+function openPapersDrawer() {
+  closeDrawer();
+  drawer.classList.remove("hidden");
+  drawer.setAttribute("aria-hidden", "false");
+  drawerBackdrop.classList.remove("hidden");
+  openDrawerName = "papers";
+}
+
+function openOutlineDrawer() {
+  closeDrawer();
+  outlineDrawer.classList.remove("hidden");
+  outlineDrawer.setAttribute("aria-hidden", "false");
+  drawerBackdrop.classList.remove("hidden");
+  openDrawerName = "outline";
+}
+
+function toggleDrawer(name) {
+  if (openDrawerName === name) { closeDrawer(); return; }
+  if (name === "papers") openPapersDrawer();
+  else if (name === "outline") openOutlineDrawer();
 }
 
 // ── Auth UI ──────────────────────────────────────────────────────────────
@@ -363,6 +393,8 @@ async function trashPaper(item) {
       currentDocId = null;
       currentTitle.textContent = "";
       pageStatus.textContent = "";
+      outlineButton.hidden = true;
+      renderOutline([]);
       // session.lastActive 也清掉
       forgetDoc(item.id);
       showLanding({ title: "已移到垃圾箱", hint: "选另一篇,或上传新的。", showUpload: true });
@@ -477,10 +509,14 @@ async function openPaper(item) {
     }
     const row = docList.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
     if (row) row.classList.add("active");
+    // 新论文 → 重算 outline
+    refreshOutline();
   } catch (e) {
     console.warn("loadPdf 失败", e);
     setSyncStatus(`渲染失败: ${e.message}`);
     showLanding({ title: "渲染失败", hint: e.message, showUpload: false });
+    outlineButton.hidden = true;
+    renderOutline([]);
   }
 }
 
@@ -489,6 +525,80 @@ function updatePageStatus() {
   if (!p) { pageStatus.textContent = ""; return; }
   // 显示 1-based 页号
   pageStatus.textContent = `p.${p.pageIndex + 1}`;
+}
+
+// ── Outline (PDF 章节目录) ───────────────────────────────────────────────
+
+function renderOutline(nodes) {
+  outlineList.innerHTML = "";
+  if (!nodes || nodes.length === 0) {
+    outlineEmpty.classList.remove("hidden");
+    return;
+  }
+  outlineEmpty.classList.add("hidden");
+  for (const node of nodes) {
+    outlineList.appendChild(buildOutlineItem(node, 0));
+  }
+}
+
+function buildOutlineItem(node, depth) {
+  const li = document.createElement("li");
+  li.className = "outline-row";
+  const row = document.createElement("div");
+  row.className = "outline-item";
+  row.style.paddingLeft = `${12 + depth * 14}px`;
+  const hasChildren = node.items && node.items.length > 0;
+  const twisty = document.createElement("span");
+  twisty.className = "twisty";
+  twisty.textContent = hasChildren ? "▾" : "";
+  const label = document.createElement("span");
+  label.className = "label";
+  label.textContent = node.title || "(无标题)";
+  if (node.bold) label.style.fontWeight = "600";
+  if (node.italic) label.style.fontStyle = "italic";
+  row.append(twisty, label);
+  row.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // 如果点的是 twisty,只折叠/展开,不跳
+    if (e.target === twisty && hasChildren) {
+      const kidsEl = li.querySelector(".outline-children");
+      if (kidsEl) {
+        const collapsed = kidsEl.classList.toggle("collapsed");
+        twisty.textContent = collapsed ? "▸" : "▾";
+      }
+      return;
+    }
+    if (node.dest) {
+      // 高亮 active
+      for (const el of outlineList.querySelectorAll(".outline-item.active")) {
+        el.classList.remove("active");
+      }
+      row.classList.add("active");
+      jumpToDest(node.dest);
+    }
+  });
+  li.appendChild(row);
+  if (hasChildren) {
+    const kids = document.createElement("ul");
+    kids.className = "outline-children";
+    for (const child of node.items) {
+      kids.appendChild(buildOutlineItem(child, depth + 1));
+    }
+    li.appendChild(kids);
+  }
+  return li;
+}
+
+async function refreshOutline() {
+  try {
+    const outline = await getOutline();
+    renderOutline(outline);
+    outlineButton.hidden = !outline || outline.length === 0;
+  } catch (e) {
+    console.warn("outline load failed", e);
+    renderOutline([]);
+    outlineButton.hidden = true;
+  }
 }
 
 // ── Ingestion: 本地上传 ───────────────────────────────────────────────────
@@ -686,8 +796,10 @@ window.addEventListener("focus", reconcileOnFocus);
 
 // ── Wiring ───────────────────────────────────────────────────────────────
 
-menuButton.addEventListener("click", openDrawer);
+menuButton.addEventListener("click", () => toggleDrawer("papers"));
+outlineButton.addEventListener("click", () => toggleDrawer("outline"));
 drawerCloseButton.addEventListener("click", closeDrawer);
+outlineCloseButton.addEventListener("click", closeDrawer);
 drawerBackdrop.addEventListener("click", closeDrawer);
 
 drawerSortButton.addEventListener("click", async () => {
@@ -733,6 +845,29 @@ logoutButton.addEventListener("click", async () => {
   await renderDocList();
   showLanding({ title: "已登出", hint: "再登录就能继续上次的论文。", showUpload: false });
 });
+
+// ── Theme cycle (day → night → auto) ────────────────────────────────────
+
+const THEME_LABELS = { day: "日", night: "夜", auto: "跟随系统" };
+
+function applyTheme() {
+  const m = localStorage.getItem(THEME_KEY) || "auto";
+  document.documentElement.setAttribute("data-theme", m);
+  if (themeLabel) themeLabel.textContent = THEME_LABELS[m] || "跟随系统";
+}
+applyTheme();
+
+themeButton?.addEventListener("click", () => {
+  const order = ["auto", "day", "night"];
+  const cur = localStorage.getItem(THEME_KEY) || "auto";
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme();
+});
+
+// 系统暗色变化时,如果当前是 auto,标签不变(还是"跟随系统"),
+// 但 CSS 的 @media (prefers-color-scheme: dark) + data-theme="auto" 已自动切色,
+// 不需要额外操作 —— theme-color meta 通过 media-aware 写法已经分别声明,浏览器自管。
 
 updateToastReload.addEventListener("click", async () => {
   if (updateMode === "site") {

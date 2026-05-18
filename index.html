@@ -1,9 +1,21 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="auto">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#d8c8a8" />
+    <meta name="theme-color" content="#F6F4EF" />
+    <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
+    <!-- 防 FOUC:在样式加载前先把 localStorage 里的主题选择应用到 <html> -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("jrp.theme");
+          if (saved === "day" || saved === "night" || saved === "auto") {
+            document.documentElement.setAttribute("data-theme", saved);
+          }
+        } catch (_) {}
+      })();
+    </script>
     <meta name="color-scheme" content="light" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -52,11 +64,20 @@
 
       <!-- 顶栏:菜单按钮 + 当前论文标题 + 状态 -->
       <header class="top-bar" id="topBar">
-        <button class="icon-button" id="menuButton" type="button" aria-label="文件菜单" title="文件菜单">
+        <button class="icon-button" id="menuButton" type="button" aria-label="论文" title="论文 list">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="4" y1="7" x2="20" y2="7"></line>
             <line x1="4" y1="12" x2="20" y2="12"></line>
             <line x1="4" y1="17" x2="20" y2="17"></line>
+          </svg>
+        </button>
+        <button class="icon-button" id="outlineButton" type="button" aria-label="章节目录" title="PDF 章节目录" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            <line x1="8" y1="7" x2="16" y2="7"></line>
+            <line x1="8" y1="11" x2="14" y2="11"></line>
+            <line x1="8" y1="15" x2="13" y2="15"></line>
           </svg>
         </button>
         <span class="title" id="currentTitle"></span>
@@ -144,7 +165,28 @@
           </svg>
           <span id="cacheStatsText">缓存 0 B</span>
         </button>
+        <button class="drawer-foot-button" id="themeButton" type="button" title="主题(日 / 夜 / 跟随系统)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <span id="themeLabel">跟随系统</span>
+        </button>
       </footer>
+    </aside>
+
+    <!-- Outline drawer (PDF 章节目录) -->
+    <aside id="outlineDrawer" class="drawer outline-drawer hidden" aria-hidden="true" aria-label="PDF 章节目录">
+      <header class="drawer-header">
+        <button class="icon-button" id="outlineCloseButton" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+            <line x1="6" y1="18" x2="18" y2="6"></line>
+          </svg>
+        </button>
+        <h2>目录</h2>
+      </header>
+      <ul id="outlineList" class="outline-list" role="list"></ul>
+      <p id="outlineEmpty" class="doc-list-empty hidden">该 PDF 没有目录</p>
     </aside>
 
     <!-- Update / conflict toasts -->

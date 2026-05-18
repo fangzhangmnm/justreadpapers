@@ -327,3 +327,25 @@ export function teardownCurrent() {
 export function getCurrentDocId() {
   return currentDocId;
 }
+
+// PDF 目录树 (bookmarks)。返回 [{title, dest, items: [...]}, ...] 或 []
+export async function getOutline() {
+  if (!currentPdf) return [];
+  try {
+    const outline = await currentPdf.getOutline();
+    return outline || [];
+  } catch (_) {
+    return [];
+  }
+}
+
+// 跳到 outline 条目的 destination。dest 可以是 string (named) 或 array (explicit)。
+// pdf.js 的 linkService 会自己 resolve named → array,再算 scroll 位置。
+export function jumpToDest(dest) {
+  if (!linkService || !dest) return;
+  try {
+    linkService.goToDestination(dest);
+  } catch (e) {
+    console.warn("jumpToDest failed:", e);
+  }
+}
