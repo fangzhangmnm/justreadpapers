@@ -90,6 +90,7 @@ let currentDocId = null;            // 正在 viewer 里的 doc 的 OneDrive ite
 let trashFolderIdCache = null;
 
 let idleTimer = null;
+let outlineJumpFlushTimer = null;  // outline 跳页后的延时 flush,后来的连击 replace 前一个
 
 // ── 小工具 ───────────────────────────────────────────────────────────────
 
@@ -576,7 +577,12 @@ function buildOutlineItem(node, depth) {
       row.classList.add("active");
       jumpToDest(node.dest);
       // 跳转是明确意图,等 viewer scroll 沉淀 + setPosition 报告 → 立刻 push,不等 debounce
-      setTimeout(() => { flush().catch(() => {}); }, 800);
+      // 连击只保留最后一个 timer
+      if (outlineJumpFlushTimer) clearTimeout(outlineJumpFlushTimer);
+      outlineJumpFlushTimer = setTimeout(() => {
+        outlineJumpFlushTimer = null;
+        flush().catch(() => {});
+      }, 800);
     }
   });
   li.appendChild(row);
