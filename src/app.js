@@ -596,19 +596,28 @@ async function reconcileOnFocus() {
   if (!isSignedIn()) return;
   try {
     const changed = await checkRemoteChanged();
-    if (changed) showUpdateToast();
+    if (changed) showUpdateToast("session", "云端有更新", "同步");
   } catch (_) {}
 }
 
-function showUpdateToast() {
+// updateMode = "session" (远端 session.json 变了 → reload session) |
+//             "site" (GH Pages 部署有新版本 → SW skip-waiting + 整页 reload)
+let updateMode = null;
+
+function showUpdateToast(mode, text, reloadLabel) {
+  updateMode = mode;
+  $("updateToastText").textContent = text;
+  $("updateToastReload").textContent = reloadLabel;
   updateToast.classList.remove("hidden");
 }
 function hideUpdateToast() {
   updateToast.classList.add("hidden");
+  updateMode = null;
 }
 
 async function applyRemoteUpdate() {
   hideUpdateToast();
+  updateMode = null;
   try {
     setSyncStatus("同步中…");
     await reloadFromRemote();
@@ -725,7 +734,21 @@ logoutButton.addEventListener("click", async () => {
   showLanding({ title: "已登出", hint: "再登录就能继续上次的论文。", showUpload: false });
 });
 
-updateToastReload.addEventListener("click", applyRemoteUpdate);
+updateToastReload.addEventListener("click", async () => {
+  if (updateMode === "site") {
+    hideUpdateToast();
+    // 把 session 先 keepalive flush 一份再 reload,免得位置丢
+    flushKeepalive();
+    try { navigator.serviceWorker.controller?.postMessage({ type: "skip-waiting" }); } catch (_) {}
+    location.reload();
+    return;
+  }
+  if (updateMode === "session") {
+    await applyRemoteUpdate();
+    return;
+  }
+  hideUpdateToast();
+});
 updateToastDismiss.addEventListener("click", hideUpdateToast);
 
 // ── Drag-and-drop 上传 ───────────────────────────────────────────────────
@@ -851,20 +874,8 @@ if ("serviceWorker" in navigator) {
   });
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "asset-updated") {
-      // 程序自身有新版本(SW 报的)→ 复用 update toast
-      const text = $("updateToastText");
-      if (text) text.textContent = "本站有新版本";
-      const reload = $("updateToastReload");
-      if (reload) reload.textContent = "刷新";
-      updateToast.classList.remove("hidden");
-      reload?.addEventListener("click", () => {
-        try {
-          navigator.serviceWorker.controller?.postMessage({ type: "skip-waiting" });
-        } catch (_) {}
-        // 把 session flush 掉再 reload
-        flushKeepalive();
-        location.reload();
-      }, { once: true });
+      // GH Pages 上 site 自己有新版本 → 复用 update toast,标"刷新"
+      showUpdateToast("site", "本站有新版本", "刷新");
     }
   });
 }
