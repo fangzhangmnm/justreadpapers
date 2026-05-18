@@ -1,0 +1,819 @@
+// 主编排:启动序列、UI 绑定、ingestion、跨设备 reconcile。
+//
+// 启动序列 (the jumpscare):
+//   1. silent MSAL 取 token
+//   2. 读 session.json
+//   3. 拿 lastActive → cache 命中秒开;未命中 → 进度条 + Graph download
+//   全程没有 library 落地屏。
+
+import {
+  initAuth, signIn, signOut, getToken, isSignedIn, getActiveAccount,
+} from "./auth.js";
+import {
+  listChildren, getItemMeta, downloadItemBlob, uploadFileToApproot,
+  renameItem, moveItemToFolder, deleteItem, ensureSubfolder, getApprootId,
+} from "./graph.js";
+import {
+  initSession, getState, setPosition, setLastActive, ensureDoc,
+  forgetDoc, getPosition, flush, flushKeepalive, checkRemoteChanged,
+  reloadFromRemote, subscribe,
+} from "./session.js";
+import * as cache from "./cache.js";
+import {
+  initViewer, loadPdf, restorePosition, currentPosition,
+  teardownCurrent, getPdfMetadata,
+} from "./viewer.js";
+import {
+  PAPERS_FOLDER, TRASH_FOLDER,
+} from "./config.js";
+
+// ── DOM refs ─────────────────────────────────────────────────────────────
+
+const $ = (id) => document.getElementById(id);
+const viewerContainer = $("viewerContainer");
+const emptyLanding = $("emptyLanding");
+const emptyTitle = $("emptyTitle");
+const emptyHint = $("emptyHint");
+const emptyUploadButton = $("emptyUploadButton");
+const progressBar = $("progressBar");
+const progressFill = $("progressFill");
+const topBar = $("topBar");
+const menuButton = $("menuButton");
+const currentTitle = $("currentTitle");
+const pageStatus = $("pageStatus");
+const syncStatus = $("syncStatus");
+const drawer = $("drawer");
+const drawerBackdrop = $("drawerBackdrop");
+const drawerCloseButton = $("drawerCloseButton");
+const drawerSortButton = $("drawerSortButton");
+const drawerRefreshButton = $("drawerRefreshButton");
+const drawerTitle = $("drawerTitle");
+const authRow = $("authRow");
+const authWho = $("authWho");
+const loginButton = $("loginButton");
+const logoutButton = $("logoutButton");
+const papersActions = $("papersActions");
+const trashActions = $("trashActions");
+const fileInput = $("fileInput");
+const uploadButton = $("uploadButton");
+const openTrashButton = $("openTrashButton");
+const backFromTrashButton = $("backFromTrashButton");
+const emptyTrashButton = $("emptyTrashButton");
+const docList = $("docList");
+const docListEmpty = $("docListEmpty");
+const cacheStatsText = $("cacheStatsText");
+const updateToast = $("updateToast");
+const updateToastReload = $("updateToastReload");
+const updateToastDismiss = $("updateToastDismiss");
+const idleOverlay = $("idleOverlay");
+
+// ── UI state ─────────────────────────────────────────────────────────────
+
+const SORT_KEY = "jrp.sort";       // "modified" | "name"
+const VIEW_KEY = "jrp.view";       // "papers" | "trash"
+const IDLE_MS = 1000 * 60 * 30;    // 30min
+
+let sortMode = localStorage.getItem(SORT_KEY) || "modified";
+let drawerView = "papers";          // 当前显示 papers 还是 trash
+let papersItems = [];               // 当前 /papers/ 列表 (driveItems)
+let trashItemsCache = [];           // 当前 /trash/ 列表
+let currentDocId = null;            // 正在 viewer 里的 doc 的 OneDrive itemId
+let trashFolderIdCache = null;
+
+let idleTimer = null;
+
+// ── 小工具 ───────────────────────────────────────────────────────────────
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function fmtDate(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d)) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function setSyncStatus(text) {
+  syncStatus.textContent = text;
+}
+
+function showProgress(v) {
+  if (v == null) {
+    progressBar.classList.add("hidden");
+    return;
+  }
+  progressBar.classList.remove("hidden");
+  progressFill.style.width = `${Math.min(100, Math.max(0, v * 100))}%`;
+}
+
+function showLanding({ title, hint, showUpload }) {
+  emptyTitle.textContent = title;
+  emptyHint.textContent = hint;
+  emptyUploadButton.hidden = !showUpload;
+  emptyLanding.classList.remove("hidden");
+}
+function hideLanding() {
+  emptyLanding.classList.add("hidden");
+}
+
+// 标题展示用:从文件名去掉 .pdf
+function fileNameToTitle(name) {
+  return (name || "").replace(/\.pdf$/i, "");
+}
+
+// OneDrive 不允许这些字符:\/:*?"<>| 以及前导 .。
+function sanitizeFilename(name) {
+  return String(name ?? "")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^\.+/, "")
+    .trim()
+    .slice(0, 200);
+}
+
+function ensurePdfExt(name) {
+  return /\.pdf$/i.test(name) ? name : `${name}.pdf`;
+}
+
+// ── Drawer 开关 ──────────────────────────────────────────────────────────
+
+function openDrawer() {
+  drawer.classList.remove("hidden");
+  drawer.setAttribute("aria-hidden", "false");
+  drawerBackdrop.classList.remove("hidden");
+}
+function closeDrawer() {
+  drawer.classList.add("hidden");
+  drawer.setAttribute("aria-hidden", "true");
+  drawerBackdrop.classList.add("hidden");
+}
+
+// ── Auth UI ──────────────────────────────────────────────────────────────
+
+function refreshAuthRow(account) {
+  if (account) {
+    authWho.textContent = account.username || account.name || "已登录";
+    loginButton.hidden = true;
+    logoutButton.hidden = false;
+  } else {
+    authWho.textContent = "未登录";
+    loginButton.hidden = false;
+    logoutButton.hidden = true;
+  }
+}
+
+// ── 列文件 + 渲染 drawer ─────────────────────────────────────────────────
+
+async function loadFolderItems() {
+  if (drawerView === "papers") {
+    papersItems = await listChildren(PAPERS_FOLDER);
+    papersItems = papersItems.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    return papersItems;
+  } else {
+    trashItemsCache = await listChildren(TRASH_FOLDER);
+    trashItemsCache = trashItemsCache.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    return trashItemsCache;
+  }
+}
+
+function sortItems(items) {
+  if (sortMode === "name") {
+    return [...items].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+  // modified: 最近修改在前
+  return [...items].sort((a, b) => {
+    const ta = Date.parse(a.lastModifiedDateTime || "") || 0;
+    const tb = Date.parse(b.lastModifiedDateTime || "") || 0;
+    return tb - ta;
+  });
+}
+
+async function renderDocList() {
+  if (!isSignedIn()) {
+    docList.innerHTML = "";
+    docListEmpty.classList.remove("hidden");
+    docListEmpty.textContent = "请先登录 OneDrive。";
+    return;
+  }
+  docList.innerHTML = "";
+  docListEmpty.classList.remove("hidden");
+  docListEmpty.textContent = "加载中…";
+
+  let items;
+  try {
+    items = await loadFolderItems();
+  } catch (e) {
+    console.warn("列文件失败", e);
+    docListEmpty.textContent = `列文件失败: ${e.message}`;
+    return;
+  }
+  items = sortItems(items);
+
+  if (items.length === 0) {
+    docListEmpty.classList.remove("hidden");
+    docListEmpty.textContent = drawerView === "trash" ? "垃圾箱是空的。" : "还没有论文,点上面「上传 PDF」。";
+    return;
+  }
+  docListEmpty.classList.add("hidden");
+
+  // 并发查 cache 命中
+  const cacheHits = new Map();
+  await Promise.all(items.map(async (it) => {
+    try { cacheHits.set(it.id, await cache.isCached(it.id)); }
+    catch (_) { cacheHits.set(it.id, false); }
+  }));
+
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.className = "doc-row";
+    li.dataset.itemId = item.id;
+    if (item.id === currentDocId) li.classList.add("active");
+    if (cacheHits.get(item.id)) li.classList.add("cached");
+
+    const name = fileNameToTitle(item.name);
+    const dateText = fmtDate(item.lastModifiedDateTime);
+    li.innerHTML = `
+      <span class="cache-dot" title="${cacheHits.get(item.id) ? "已缓存" : "未缓存"}"></span>
+      <span class="name">${escapeHtml(name)}</span>
+      <span class="meta">${escapeHtml(dateText)}</span>
+      <span class="row-actions">
+        ${drawerView === "papers"
+          ? `<button data-act="rename" title="改名" aria-label="改名">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            </button>
+            <button data-act="trash" title="移到垃圾箱" aria-label="移到垃圾箱">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+            </button>`
+          : `<button data-act="restore" title="还原" aria-label="还原">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
+            </button>
+            <button data-act="purge" title="永久删除" aria-label="永久删除">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>`
+        }
+      </span>
+    `;
+    // 行点击 → 打开 (trash 视图不打开,只用按钮 restore / purge)
+    li.addEventListener("click", (e) => {
+      if (e.target.closest(".row-actions")) return;
+      if (drawerView === "papers") openPaper(item);
+    });
+    const actsEl = li.querySelector(".row-actions");
+    actsEl?.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-act]");
+      if (!btn) return;
+      e.stopPropagation();
+      const act = btn.dataset.act;
+      if (act === "rename") startRename(li, item);
+      else if (act === "trash") trashPaper(item);
+      else if (act === "restore") restorePaper(item);
+      else if (act === "purge") purgePaper(item);
+    });
+    docList.appendChild(li);
+  }
+
+  updateCacheStats();
+}
+
+async function updateCacheStats() {
+  try {
+    const bytes = await cache.totalBytes();
+    cacheStatsText.textContent = `缓存 ${cache.formatBytes(bytes)}`;
+  } catch (_) {
+    cacheStatsText.textContent = "缓存 -";
+  }
+}
+
+// ── Inline rename ────────────────────────────────────────────────────────
+
+function startRename(rowEl, item) {
+  const nameEl = rowEl.querySelector(".name");
+  const current = fileNameToTitle(item.name);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "name-input";
+  input.value = current;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = async () => {
+    const next = sanitizeFilename(input.value);
+    if (!next || next === current) {
+      cancel();
+      return;
+    }
+    const newName = ensurePdfExt(next);
+    try {
+      setSyncStatus("改名中…");
+      const updated = await renameItem(item.id, newName, item.eTag);
+      item.name = updated.name;
+      item.eTag = updated.eTag;
+      setSyncStatus("已同步");
+      // 当前正在读的话同步顶栏
+      if (currentDocId === item.id) {
+        currentTitle.textContent = fileNameToTitle(updated.name);
+      }
+      await renderDocList();
+    } catch (e) {
+      console.warn("rename 失败", e);
+      setSyncStatus(`改名失败: ${e.message}`);
+      cancel();
+    }
+  };
+  const cancel = () => {
+    const span = document.createElement("span");
+    span.className = "name";
+    span.textContent = current;
+    input.replaceWith(span);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+  });
+  input.addEventListener("blur", commit);
+}
+
+// ── Trash actions ────────────────────────────────────────────────────────
+
+async function getTrashFolderId() {
+  if (trashFolderIdCache) return trashFolderIdCache;
+  trashFolderIdCache = await ensureSubfolder(TRASH_FOLDER);
+  return trashFolderIdCache;
+}
+
+async function trashPaper(item) {
+  if (!confirm(`把「${fileNameToTitle(item.name)}」移到垃圾箱?`)) return;
+  try {
+    setSyncStatus("移动中…");
+    const trashId = await getTrashFolderId();
+    await moveItemToFolder(item.id, trashId);
+    // 删本地 cache 让空间能给别的论文
+    await cache.del(item.id).catch(() => {});
+    // 当前正读的就是它 → teardown + 切到 lastActive 或空
+    if (currentDocId === item.id) {
+      teardownCurrent();
+      currentDocId = null;
+      currentTitle.textContent = "";
+      pageStatus.textContent = "";
+      // session.lastActive 也清掉
+      forgetDoc(item.id);
+      showLanding({ title: "已移到垃圾箱", hint: "选另一篇,或上传新的。", showUpload: true });
+    } else {
+      forgetDoc(item.id);
+    }
+    setSyncStatus("已同步");
+    await renderDocList();
+  } catch (e) {
+    console.warn("trash 失败", e);
+    setSyncStatus(`移动失败: ${e.message}`);
+  }
+}
+
+async function restorePaper(item) {
+  try {
+    setSyncStatus("还原中…");
+    const rootId = await getApprootId();
+    // 先 ensure papers folder
+    const papersId = await ensureSubfolder(PAPERS_FOLDER);
+    await moveItemToFolder(item.id, papersId);
+    setSyncStatus("已同步");
+    await renderDocList();
+  } catch (e) {
+    console.warn("restore 失败", e);
+    setSyncStatus(`还原失败: ${e.message}`);
+  }
+}
+
+async function purgePaper(item) {
+  if (!confirm(`永久删除「${fileNameToTitle(item.name)}」?不可撤销。`)) return;
+  try {
+    setSyncStatus("删除中…");
+    await deleteItem(item.id);
+    await cache.del(item.id).catch(() => {});
+    forgetDoc(item.id);
+    setSyncStatus("已同步");
+    await renderDocList();
+  } catch (e) {
+    console.warn("purge 失败", e);
+    setSyncStatus(`删除失败: ${e.message}`);
+  }
+}
+
+async function emptyAllTrash() {
+  if (!confirm("清空垃圾箱,所有文件永久删除?")) return;
+  try {
+    setSyncStatus("清空中…");
+    for (const it of trashItemsCache) {
+      try { await deleteItem(it.id); } catch (_) {}
+      cache.del(it.id).catch(() => {});
+      forgetDoc(it.id);
+    }
+    setSyncStatus("已同步");
+    await renderDocList();
+  } catch (e) {
+    console.warn("empty trash 失败", e);
+    setSyncStatus(`失败: ${e.message}`);
+  }
+}
+
+// ── 打开 (load) 一篇论文 ─────────────────────────────────────────────────
+
+async function openPaper(item) {
+  hideLanding();
+  closeDrawer();
+  currentDocId = item.id;
+  currentTitle.textContent = fileNameToTitle(item.name);
+  pageStatus.textContent = "";
+  setSyncStatus("加载中…");
+  setLastActive(item.id);
+  ensureDoc(item.id, { addedAt: Date.parse(item.createdDateTime || "") || Date.now() });
+
+  // 1) 试 cache
+  let blob = null;
+  try { blob = await cache.getBlob(item.id); } catch (_) {}
+  if (blob) {
+    cache.touch(item.id).catch(() => {});
+    showProgress(null);
+  } else {
+    // 2) Graph 下载,显示进度条
+    showProgress(0);
+    try {
+      const { blob: downloaded } = await downloadItemBlob(item.id);
+      blob = downloaded;
+      cache.set(item.id, blob, { name: item.name, eTag: item.eTag }).catch((e) => {
+        console.warn("cache.set 失败", e);
+      });
+    } catch (e) {
+      console.warn("下载失败", e);
+      setSyncStatus(`下载失败: ${e.message}`);
+      showProgress(null);
+      showLanding({
+        title: "加载失败",
+        hint: e.message,
+        showUpload: false,
+      });
+      return;
+    }
+    showProgress(null);
+  }
+
+  // 3) 进 viewer
+  try {
+    const pos = getPosition(item.id);
+    await loadPdf({ docId: item.id, data: blob, position: pos });
+    setSyncStatus("synced");
+    updatePageStatus();
+    // 高亮 drawer 里这一行(下次 render 也会高亮)
+    for (const el of docList.querySelectorAll(".doc-row.active")) {
+      el.classList.remove("active");
+    }
+    const row = docList.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
+    if (row) row.classList.add("active");
+  } catch (e) {
+    console.warn("loadPdf 失败", e);
+    setSyncStatus(`渲染失败: ${e.message}`);
+    showLanding({ title: "渲染失败", hint: e.message, showUpload: false });
+  }
+}
+
+function updatePageStatus() {
+  const p = currentPosition();
+  if (!p) { pageStatus.textContent = ""; return; }
+  // 显示 1-based 页号
+  pageStatus.textContent = `p.${p.pageIndex + 1}`;
+}
+
+// ── Ingestion: 本地上传 ───────────────────────────────────────────────────
+
+async function uploadFiles(files) {
+  if (!files || !files.length) return;
+  if (!isSignedIn()) {
+    alert("请先登录");
+    return;
+  }
+  closeDrawer();
+  showProgress(0);
+  setSyncStatus("上传中…");
+  try {
+    let lastUploaded = null;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const desired = await deriveFileName(f);
+      // path = papers/<desired>
+      const targetName = ensurePdfExt(sanitizeFilename(desired));
+      // ensure /papers/ 存在 (uploadFileToApproot 写 path 时,OneDrive 会自动建中间文件夹)
+      const item = await uploadFileToApproot(`${PAPERS_FOLDER}/${targetName}`, f, "application/pdf");
+      // session: ensure doc
+      ensureDoc(item.id, { addedAt: Date.now() });
+      // 进度
+      showProgress((i + 1) / files.length);
+      lastUploaded = item;
+    }
+    setSyncStatus("已同步");
+    showProgress(null);
+    // 上传完自动打开最后一份
+    if (lastUploaded) {
+      // 拿一次 meta 拿 downloadUrl 之类(uploadFileToApproot 已经返回够用的 driveItem)
+      await openPaper(lastUploaded);
+    } else {
+      await renderDocList();
+    }
+  } catch (e) {
+    console.warn("upload 失败", e);
+    setSyncStatus(`上传失败: ${e.message}`);
+    showProgress(null);
+    alert(`上传失败: ${e.message}`);
+  }
+}
+
+// 决定上传文件的目标名:优先 PDF metadata Title,fallback 到原文件名(去后缀)
+async function deriveFileName(file) {
+  try {
+    // 用 pdf.js 临时打开,只为读 metadata.Title
+    // (不进 viewer,不渲染)
+    const buf = await file.arrayBuffer();
+    // 临时 import 一次 pdfjs;通常已经被 viewer 预加载过
+    const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const meta = await doc.getMetadata();
+    const title = (meta?.info?.Title || "").trim();
+    doc.destroy();
+    if (title) return title;
+  } catch (e) {
+    console.warn("PDF metadata 读失败,fallback 到原名", e);
+  }
+  return file.name.replace(/\.pdf$/i, "");
+}
+
+// ── 启动序列 (the jumpscare) ─────────────────────────────────────────────
+
+async function jumpscare() {
+  // session 已 init 完毕,看 lastActive
+  const st = getState();
+  const lastId = st.lastActive;
+  if (!lastId) {
+    showLanding({
+      title: papersItems.length === 0 ? "还没有论文" : "选一篇开始",
+      hint: papersItems.length === 0 ? "点左上角菜单,上传 PDF。" : "点左上角菜单选一篇。",
+      showUpload: true,
+    });
+    return;
+  }
+  // 找当前 papers 列表里有没有
+  let item = papersItems.find((p) => p.id === lastId);
+  if (!item) {
+    // 可能 lastActive 是另一台设备 trash 掉的;或者 papers 列表还没拉到
+    try {
+      item = await getItemMeta(lastId);
+    } catch (_) {
+      // 找不到 → 清掉 lastActive,落到 landing
+      console.warn("lastActive 找不到了:", lastId);
+      // 不调 forgetDoc,可能只是 trash;留着 doc 状态
+      showLanding({
+        title: "上次的论文不见了",
+        hint: "可能已被另一台设备删除。选一篇或上传新的。",
+        showUpload: true,
+      });
+      return;
+    }
+  }
+  await openPaper(item);
+}
+
+// ── reconcile (window focus + idle) ──────────────────────────────────────
+
+async function reconcileOnFocus() {
+  if (!isSignedIn()) return;
+  try {
+    const changed = await checkRemoteChanged();
+    if (changed) showUpdateToast();
+  } catch (_) {}
+}
+
+function showUpdateToast() {
+  updateToast.classList.remove("hidden");
+}
+function hideUpdateToast() {
+  updateToast.classList.add("hidden");
+}
+
+async function applyRemoteUpdate() {
+  hideUpdateToast();
+  try {
+    setSyncStatus("同步中…");
+    await reloadFromRemote();
+    const st = getState();
+    // 远端 lastActive 跟本地当前 viewer 不一样 → 切过去
+    if (st.lastActive && st.lastActive !== currentDocId) {
+      await renderDocList();
+      // 拿到 driveItem(优先用刚 list 的;不然 meta 查)
+      let item = papersItems.find((p) => p.id === st.lastActive);
+      if (!item) {
+        try { item = await getItemMeta(st.lastActive); }
+        catch (_) { item = null; }
+      }
+      if (item) await openPaper(item);
+    } else if (currentDocId) {
+      // 还是同一篇,但 position 可能被另一端更新了 → restore 到 remote 位置
+      const pos = getPosition(currentDocId);
+      if (pos) restorePosition(pos);
+      await renderDocList();
+    } else {
+      await renderDocList();
+    }
+    setSyncStatus("synced");
+  } catch (e) {
+    setSyncStatus(`同步失败: ${e.message}`);
+  }
+}
+
+// idle: N 分钟没操作 → 弹蒙层提示 "点击同步"
+function resetIdle() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleOverlay.classList.add("hidden");
+  idleTimer = setTimeout(() => {
+    idleOverlay.classList.remove("hidden");
+  }, IDLE_MS);
+}
+["mousemove", "keydown", "wheel", "touchstart", "scroll"].forEach((ev) => {
+  window.addEventListener(ev, resetIdle, { passive: true, capture: true });
+});
+
+idleOverlay.addEventListener("click", async () => {
+  idleOverlay.classList.add("hidden");
+  resetIdle();
+  await applyRemoteUpdate();
+});
+
+// ── Position write-back ──────────────────────────────────────────────────
+
+function onPositionFromViewer(pos) {
+  if (!currentDocId || !pos) return;
+  setPosition(currentDocId, pos);
+  pageStatus.textContent = `p.${pos.pageIndex + 1}`;
+}
+
+// 离开页面时 keepalive flush;切后台也试一次普通 flush
+window.addEventListener("beforeunload", () => {
+  flushKeepalive();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    flush().catch(() => {});
+    flushKeepalive();
+  }
+});
+window.addEventListener("focus", reconcileOnFocus);
+
+// ── Wiring ───────────────────────────────────────────────────────────────
+
+menuButton.addEventListener("click", openDrawer);
+drawerCloseButton.addEventListener("click", closeDrawer);
+drawerBackdrop.addEventListener("click", closeDrawer);
+
+drawerSortButton.addEventListener("click", async () => {
+  sortMode = sortMode === "modified" ? "name" : "modified";
+  localStorage.setItem(SORT_KEY, sortMode);
+  await renderDocList();
+});
+drawerRefreshButton.addEventListener("click", async () => {
+  await renderDocList();
+});
+
+uploadButton.addEventListener("click", () => fileInput.click());
+emptyUploadButton.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+  const files = Array.from(fileInput.files || []);
+  fileInput.value = "";
+  uploadFiles(files);
+});
+
+openTrashButton.addEventListener("click", async () => {
+  drawerView = "trash";
+  drawerTitle.textContent = "垃圾箱";
+  papersActions.classList.add("hidden");
+  trashActions.classList.remove("hidden");
+  await renderDocList();
+});
+backFromTrashButton.addEventListener("click", async () => {
+  drawerView = "papers";
+  drawerTitle.textContent = "论文";
+  papersActions.classList.remove("hidden");
+  trashActions.classList.add("hidden");
+  await renderDocList();
+});
+emptyTrashButton.addEventListener("click", emptyAllTrash);
+
+loginButton.addEventListener("click", async () => {
+  try { await signIn(); }
+  catch (e) { alert(`登录失败: ${e.message}`); }
+});
+logoutButton.addEventListener("click", async () => {
+  await signOut();
+  refreshAuthRow(null);
+  await renderDocList();
+  showLanding({ title: "已登出", hint: "再登录就能继续上次的论文。", showUpload: false });
+});
+
+updateToastReload.addEventListener("click", applyRemoteUpdate);
+updateToastDismiss.addEventListener("click", hideUpdateToast);
+
+// ── Main ─────────────────────────────────────────────────────────────────
+
+async function main() {
+  // viewer 先 init —— 即使没登录也可以拖个本地 PDF 进来看 (将来),
+  // 现在主要是为了启动期不重复加载 pdf.js
+  await initViewer({
+    containerEl: viewerContainer,
+    onPosition: onPositionFromViewer,
+  });
+
+  let authResult;
+  try {
+    authResult = await initAuth();
+  } catch (e) {
+    console.warn("auth init 失败", e);
+    showLanding({
+      title: "登录初始化失败",
+      hint: e.message,
+      showUpload: false,
+    });
+    return;
+  }
+
+  refreshAuthRow(authResult.account);
+
+  if (!authResult.signedIn) {
+    // 没登录(包括 probedAccount 那种 "缓存账号但本 app 未授权")
+    showLanding({
+      title: authResult.probedAccount ? "需要授权" : "请登录 OneDrive",
+      hint: authResult.probedAccount
+        ? `检测到账号 ${authResult.probedAccount.username},点登录授权本 app。`
+        : "登录一次,以后纯 URL 就能继续读。",
+      showUpload: false,
+    });
+    return;
+  }
+
+  // 已登录:并发 init session + 列文件 → 然后 jumpscare
+  setSyncStatus("加载…");
+  try {
+    await Promise.all([
+      initSession(),
+      (async () => { try { papersItems = await listChildren(PAPERS_FOLDER); } catch (_) { papersItems = []; } })(),
+    ]);
+    papersItems = papersItems.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    setSyncStatus("synced");
+  } catch (e) {
+    console.warn("init session 失败", e);
+    setSyncStatus(`session 加载失败: ${e.message}`);
+  }
+
+  await jumpscare();
+  // drawer 默认不开,但先 render 一次让用户打开时是最新的
+  await renderDocList();
+  resetIdle();
+}
+
+main().catch((e) => {
+  console.error("启动失败", e);
+  setSyncStatus(`启动失败: ${e.message}`);
+});
+
+// ── Service worker registration ──────────────────────────────────────────
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("./service-worker.js")
+      .then((reg) => console.log("SW registered", reg.scope))
+      .catch((e) => console.warn("SW register failed", e));
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "asset-updated") {
+      // 程序自身有新版本(SW 报的)→ 复用 update toast
+      const text = $("updateToastText");
+      if (text) text.textContent = "本站有新版本";
+      const reload = $("updateToastReload");
+      if (reload) reload.textContent = "刷新";
+      updateToast.classList.remove("hidden");
+      reload?.addEventListener("click", () => {
+        try {
+          navigator.serviceWorker.controller?.postMessage({ type: "skip-waiting" });
+        } catch (_) {}
+        // 把 session flush 掉再 reload
+        flushKeepalive();
+        location.reload();
+      }, { once: true });
+    }
+  });
+}

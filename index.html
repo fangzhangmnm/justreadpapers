@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#d8c8a8" />
+    <meta name="color-scheme" content="light" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Papers" />
+    <title>justreadpapers</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./src/styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/web/pdf_viewer.css"
+    />
+  </head>
+  <body>
+    <main class="surface" aria-label="justreadpapers">
+      <!-- PDF viewer 主表面。pdf.js 接管 #viewerContainer + 内部 #viewer.pdfViewer -->
+      <div id="viewerContainer" class="viewer-container">
+        <div id="viewer" class="pdfViewer"></div>
+      </div>
+
+      <!-- 落地空态(没登录 / 没论文 / 加载失败) -->
+      <div id="emptyLanding" class="empty-landing hidden" aria-live="polite">
+        <div class="title" id="emptyTitle">还没有论文</div>
+        <div class="hint" id="emptyHint">点左上角菜单,上传一份 PDF。</div>
+        <button id="emptyUploadButton" type="button" hidden>选 PDF 上传</button>
+      </div>
+
+      <!-- PDF 下载进度条 -->
+      <div id="progressBar" class="progress-bar hidden">
+        <div class="fill" id="progressFill"></div>
+      </div>
+
+      <!-- 顶栏:菜单按钮 + 当前论文标题 + 状态 -->
+      <header class="top-bar auto-hide" id="topBar">
+        <button class="icon-button" id="menuButton" type="button" aria-label="文件菜单" title="文件菜单">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="7" x2="20" y2="7"></line>
+            <line x1="4" y1="12" x2="20" y2="12"></line>
+            <line x1="4" y1="17" x2="20" y2="17"></line>
+          </svg>
+        </button>
+        <span class="title" id="currentTitle"></span>
+        <span class="status" aria-live="polite">
+          <span id="pageStatus"></span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="syncStatus">就绪</span>
+        </span>
+      </header>
+    </main>
+
+    <!-- Drawer -->
+    <div id="drawerBackdrop" class="backdrop hidden" aria-hidden="true"></div>
+    <aside id="drawer" class="drawer hidden" aria-hidden="true" aria-label="文件管理">
+      <header class="drawer-header">
+        <button class="icon-button" id="drawerCloseButton" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+            <line x1="6" y1="18" x2="18" y2="6"></line>
+          </svg>
+        </button>
+        <h2 id="drawerTitle">论文</h2>
+        <button class="icon-button" id="drawerSortButton" type="button" aria-label="切换排序" title="切换排序(日期 / 名称)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="13" y2="6"></line>
+            <line x1="3" y1="12" x2="11" y2="12"></line>
+            <line x1="3" y1="18" x2="9" y2="18"></line>
+            <polyline points="17 4 17 20 21 16"></polyline>
+            <line x1="17" y1="20" x2="13" y2="16"></line>
+          </svg>
+        </button>
+        <button class="icon-button" id="drawerRefreshButton" type="button" aria-label="刷新" title="从云端重新列出">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </header>
+
+      <div class="auth-row" id="authRow">
+        <span class="who" id="authWho">未登录</span>
+        <button id="loginButton" type="button">登录</button>
+        <button id="logoutButton" type="button" hidden>登出</button>
+      </div>
+
+      <div class="drawer-actions" id="papersActions">
+        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
+        <button class="drawer-action" id="uploadButton" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>上传 PDF</span>
+        </button>
+        <button class="drawer-action" id="openTrashButton" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+          </svg>
+          <span>垃圾箱</span>
+        </button>
+      </div>
+
+      <div class="drawer-actions hidden" id="trashActions">
+        <button class="drawer-action" id="backFromTrashButton" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>返回</span>
+        </button>
+        <button class="drawer-action danger" id="emptyTrashButton" type="button">清空垃圾箱</button>
+      </div>
+
+      <ul id="docList" class="doc-list" role="list"></ul>
+      <p id="docListEmpty" class="doc-list-empty hidden">这里还没有文件。</p>
+
+      <footer class="drawer-foot">
+        <button class="drawer-foot-button" id="cacheStatsButton" type="button" title="本地缓存大小">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <ellipse cx="12" cy="6" rx="9" ry="3"></ellipse>
+            <path d="M3 6v6a9 3 0 0 0 18 0V6"></path>
+            <path d="M3 12v6a9 3 0 0 0 18 0v-6"></path>
+          </svg>
+          <span id="cacheStatsText">缓存 0 B</span>
+        </button>
+      </footer>
+    </aside>
+
+    <!-- Update / conflict toasts -->
+    <div id="updateToast" class="toast hidden" role="status" aria-live="polite">
+      <span id="updateToastText">云端有更新</span>
+      <button id="updateToastReload" type="button">同步</button>
+      <button id="updateToastDismiss" type="button" class="dismiss" aria-label="忽略">×</button>
+    </div>
+
+    <!-- 闲置 overlay -->
+    <div id="idleOverlay" class="idle-overlay hidden" role="dialog" aria-label="已闲置">
+      <div class="idle-card">
+        <p class="idle-title">已闲置一段时间</p>
+        <p class="idle-hint">点击同步云端最新版</p>
+      </div>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "justreadpapers",
+  "short_name": "Papers",
+  "description": "Open URL → 立刻回到上次那篇论文的那一页。OneDrive 同步,跨设备 resume。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#d8c8a8",
+  "theme_color": "#d8c8a8",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

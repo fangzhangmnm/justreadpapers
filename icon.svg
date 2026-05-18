@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 背景 (warm parchment) -->
+  <rect width="512" height="512" rx="96" fill="#d8c8a8"/>
+  <!-- 论文页(白纸 + 阴影感) -->
+  <rect x="120" y="92" width="272" height="328" rx="12"
+        fill="#fbf3e1" stroke="#8a481e" stroke-width="6"/>
+  <!-- 折角 -->
+  <path d="M328 92 L392 156 L328 156 Z" fill="#e6d6b6" stroke="#8a481e" stroke-width="6" stroke-linejoin="round"/>
+  <!-- 文本行 (代表正文) -->
+  <g stroke="#8a481e" stroke-width="10" stroke-linecap="round" opacity="0.55">
+    <line x1="156" y1="200" x2="356" y2="200"/>
+    <line x1="156" y1="240" x2="336" y2="240"/>
+    <line x1="156" y1="280" x2="356" y2="280"/>
+    <line x1="156" y1="320" x2="296" y2="320"/>
+    <line x1="156" y1="360" x2="336" y2="360"/>
+  </g>
+</svg>
