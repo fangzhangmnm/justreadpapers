@@ -64,10 +64,15 @@ function computeCozyScale() {
     if (!vp) return null;
     const naturalCssWidth = vp.width / vp.scale;
     const availCss = container.clientWidth - 32;
-    const targetInches = TARGET_INCHES_BASE * detectUaScaleFactor();
-    const targetCss = Math.min(availCss, targetInches * CSS_PX_PER_INCH);
+    // spread 模式下 "fit width" 的"页"是一对页(= 2 × 单页宽);
+    // 同时 cozy 的 9" 上限也只对单页有意义(双页贴满容器才看得清字),所以 spread 模式不 cap inch。
+    const isSpread = !!(viewer.spreadMode && viewer.spreadMode !== 0);
+    const effectiveNatural = naturalCssWidth * (isSpread ? 2 : 1);
+    const targetCss = isSpread
+      ? availCss
+      : Math.min(availCss, TARGET_INCHES_BASE * detectUaScaleFactor() * CSS_PX_PER_INCH);
     if (targetCss <= 0) return null;
-    const s = targetCss / naturalCssWidth;
+    const s = targetCss / effectiveNatural;
     return Math.max(0.1, Math.min(4, s));
   } catch (_) {
     return null;
