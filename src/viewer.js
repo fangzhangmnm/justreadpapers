@@ -38,12 +38,13 @@ let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
-// 目标 CSS 阅读宽度上限 18 英寸(@ 96 CSS px/inch = 1728 px)。
-// 单页模式:整页 ≤ 18";spread 模式:整 spread ≤ 18" → 每页 ≤ 9"。
-// 容器比 18" 小就 fit 容器。下限 scale 0.1 让 phone / Quest 真能缩到 fit-width。
+// 每页阅读宽度上限 9 英寸(@ 96 CSS px/inch = 864 px ≈ A4 全宽)。
+// 单页模式:render 单元 = 1 页 → 上限 9";
+// spread 模式:render 单元 = 2 页 → 上限 18" → 每页 ≤ 9"。
+// 容器比上限小就 fit 容器。下限 scale 0.1 让 phone / Quest 真能缩到 fit-width。
 //
 // DPI 适配:Quest perceived CSS px 物理偏大,目标 ×0.7。
-const TARGET_INCHES_BASE = 18;
+const TARGET_INCHES_PER_PAGE = 9;
 const CSS_PX_PER_INCH = 96;
 
 function detectUaScaleFactor() {
@@ -61,11 +62,13 @@ function computeCozyScale() {
     const naturalCssWidth = vp.width / vp.scale;
     const availCss = container.clientWidth - 32;
     const isSpread = !!(viewer.spreadMode && viewer.spreadMode !== 0);
-    // spread 模式下 "fit width" 的"页"是一对页(= 2 × 单页宽)
-    const effectiveNatural = naturalCssWidth * (isSpread ? 2 : 1);
-    const targetCss = Math.min(availCss, TARGET_INCHES_BASE * detectUaScaleFactor() * CSS_PX_PER_INCH);
+    const pagesPerRow = isSpread ? 2 : 1;
+    const targetCss = Math.min(
+      availCss,
+      TARGET_INCHES_PER_PAGE * pagesPerRow * detectUaScaleFactor() * CSS_PX_PER_INCH,
+    );
     if (targetCss <= 0) return null;
-    const s = targetCss / effectiveNatural;
+    const s = targetCss / (naturalCssWidth * pagesPerRow);
     return Math.max(0.1, Math.min(4, s));
   } catch (_) {
     return null;
