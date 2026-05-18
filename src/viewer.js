@@ -35,20 +35,34 @@ let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
-// 目标 CSS 渲染宽度:大屏上不撑满,窄屏(Quest / 手机 / 横向论文)允许真的缩到很小。
-// 下限 0.1 不是 0.5 —— Quest viewport 比 naturalCssWidth 还窄时,0.5 会让页面溢出半边。
-const TARGET_CSS_WIDTH = 900;
+// 目标 CSS 阅读宽度:9 英寸 @ 96 CSS px/inch ≈ 864 px (≈ A4 全宽)。
+// 不超过容器,下限 0.1 让窄屏真的缩到 fit-width。
+//
+// DPI 自动适配:
+//  - Quest browser:perceived CSS px 物理更大(虚拟屏放得近),所以同样的 CSS px
+//    在 Quest 看起来比 desktop 大。把目标乘以 0.7 (即目标 ~6 英寸) 来补偿。
+//  - 手机:窄屏会被 availCss 自然 cap,不用额外补偿。
+//  - HiDPI 桌面 (4K 等):CSS px 仍然 ≈ 1/96 inch (DPR 自动补偿物理像素密度),
+//    cozy 目标 ≈ 9 英寸物理,在 50" 4K 上看起来约 9% 宽度,合理。
+const TARGET_INCHES_BASE = 9;
+const CSS_PX_PER_INCH = 96;
+
+function detectUaScaleFactor() {
+  const ua = navigator.userAgent || "";
+  if (/Quest|OculusBrowser/i.test(ua)) return 0.7;  // Quest perceived 偏大,目标缩到 ~6"
+  return 1.0;
+}
+
 function computeCozyScale() {
   try {
     const pv = viewer.getPageView(0);
     if (!pv) return null;
-    // pv.viewport.width 是当前 scale 下的 CSS px 宽度;还原到 scale=1 的自然宽
     const vp = pv.viewport;
     if (!vp) return null;
     const naturalCssWidth = vp.width / vp.scale;
-    // 容器宽度(扣掉一点 padding)
     const availCss = container.clientWidth - 32;
-    const targetCss = Math.min(TARGET_CSS_WIDTH, availCss);
+    const targetInches = TARGET_INCHES_BASE * detectUaScaleFactor();
+    const targetCss = Math.min(availCss, targetInches * CSS_PX_PER_INCH);
     if (targetCss <= 0) return null;
     const s = targetCss / naturalCssWidth;
     return Math.max(0.1, Math.min(4, s));

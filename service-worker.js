@@ -8,7 +8,7 @@
 
 // Bump 这个常量 = SW 源 byte 变 → 浏览器触发 updatefound,iOS PWA 也能感知
 // 部署前手 bump (没自动化 build pipeline)。
-const CACHE_VERSION = "v4-2026-05-18";
+const CACHE_VERSION = "v5-2026-05-18";
 const CACHE_NAME = `jrp-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

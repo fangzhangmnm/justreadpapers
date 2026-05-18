@@ -97,37 +97,43 @@ body {
 /* viewer 物理上从 "top-bar + 安全区" 下方开始,不靠 padding-top 兜底压顶栏 */
 .viewer-container {
   position: absolute;
-  top: calc(24px + env(safe-area-inset-top, 0px));
+  top: calc(36px + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   bottom: 0;
   overflow: auto;
   background: var(--bg-0);
   /* PDF.js 需要 container.position 是 absolute / relative */
-  scrollbar-width: thin;
+  scrollbar-width: auto;
   scrollbar-color: var(--accent-strong) transparent;
 }
-.viewer-container::-webkit-scrollbar { width: 10px; height: 10px; }
+.viewer-container::-webkit-scrollbar { width: 14px; height: 14px; }
 .viewer-container::-webkit-scrollbar-track { background: transparent; }
 .viewer-container::-webkit-scrollbar-thumb {
   background: var(--accent-strong);
-  border-radius: 5px;
-  border: 2px solid transparent;
+  border-radius: 7px;
+  border: 3px solid transparent;
   background-clip: padding-box;
 }
 .viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
 .viewer-container::-webkit-scrollbar-corner { background: transparent; }
 
-/* Drawer / outline 里面的列表也跟上主题 */
+/* Drawer / outline 里面的列表也跟上主题,同样的粗细方便点 */
 .doc-list, .outline-list {
-  scrollbar-width: thin;
+  scrollbar-width: auto;
   scrollbar-color: var(--accent-strong) transparent;
 }
-.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 8px; }
+.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 14px; }
 .doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: transparent; }
 .doc-list::-webkit-scrollbar-thumb, .outline-list::-webkit-scrollbar-thumb {
   background: var(--accent-strong);
-  border-radius: 4px;
+  border-radius: 7px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.doc-list::-webkit-scrollbar-thumb:hover, .outline-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: padding-box;
 }
 
 /* pdf.js 的 .pdfViewer 内部布局 */
@@ -154,12 +160,12 @@ body {
   right: 0;
   display: flex;
   align-items: flex-end;  /* icons 贴底,让出 safe-area-top */
-  gap: 6px;
+  gap: 8px;
   padding-top: env(safe-area-inset-top, 0px);
-  padding-left: max(6px, env(safe-area-inset-left, 0px));
-  padding-right: max(6px, env(safe-area-inset-right, 0px));
+  padding-left: max(10px, env(safe-area-inset-left, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
   padding-bottom: 0;
-  min-height: calc(24px + env(safe-area-inset-top, 0px));
+  min-height: calc(36px + env(safe-area-inset-top, 0px));
   background: var(--bg-1);
   border-bottom: 1px solid var(--line-strong);
   z-index: 5;
@@ -167,12 +173,12 @@ body {
 
 .icon-button {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -180,15 +186,15 @@ body {
   transition: color 120ms ease, background 120ms ease;
 }
 .icon-button:hover { background: var(--bg-2); color: var(--ink); }
-.icon-button svg { width: 14px; height: 14px; }
+.icon-button svg { width: 20px; height: 20px; }
 
-/* drawer 里图标按钮可以稍大些(空间够) */
-.drawer-header .icon-button { width: 28px; height: 28px; }
-.drawer-header .icon-button svg { width: 16px; height: 16px; }
+/* drawer 里图标按钮再大一档 */
+.drawer-header .icon-button { width: 36px; height: 36px; }
+.drawer-header .icon-button svg { width: 20px; height: 20px; }
 
 .top-bar .title {
   flex: 1 1 auto;
-  font-size: 11px;
+  font-size: 16px;
   color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
@@ -198,23 +204,16 @@ body {
 
 .top-bar .status {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--ink-muted);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .top-bar .status .sep { opacity: 0.4; }
-#syncStatus.error { color: var(--danger); }
+#syncStatus.error    { color: var(--danger); }
 #syncStatus.unsynced { color: var(--accent-strong); }
-#syncStatus.syncing {
-  color: var(--accent);
-  animation: jrp-status-pulse 1.4s ease-in-out infinite;
-}
-@keyframes jrp-status-pulse {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 1; }
-}
+#syncStatus.syncing  { color: var(--accent); }   /* 颜色暗示,不闪 —— 阅读时别干扰注意力 */
 
 /* ── Drawer (file panel) ─────────────────────────────────────── */
 
@@ -297,16 +296,21 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
-  background: var(--bg-2);
-  color: var(--ink);
-  border: 1px solid var(--line);
+  height: 40px;
+  background: transparent;
+  color: var(--ink-soft);
+  border: 0;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
-.vc-button:hover { background: var(--bg-3); }
-.vc-button svg { width: 16px; height: 16px; }
+.vc-button:hover { background: var(--bg-2); color: var(--ink); }
+.vc-button svg {
+  width: 20px;
+  height: 20px;
+  display: block;     /* 避免 inline 默认基线对齐把图标挤没 */
+  stroke: currentColor;
+}
 
 .drawer-actions {
   display: flex;
@@ -349,6 +353,7 @@ body {
 }
 .doc-list-empty.hidden { display: none; }
 .doc-row {
+  position: relative;             /* row-actions 用绝对定位悬浮,不参与撑高 */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -383,18 +388,35 @@ body {
   background: var(--accent);
   border-color: var(--accent);
 }
+/* hover 时浮出来,不占据行高 (绝对定位 + 不透明背景遮住 .meta) */
 .doc-row .row-actions {
-  display: none;
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--bg-2);
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity 120ms ease;
 }
-.doc-row:hover .row-actions { display: inline-flex; }
+.doc-row:hover .row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 .doc-row .row-actions button {
   border: 0;
   background: transparent;
-  color: var(--ink-muted);
+  color: var(--ink-soft);
   padding: 4px;
   border-radius: 4px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .doc-row .row-actions button:hover { background: var(--bg-3); color: var(--ink); }
 
@@ -541,7 +563,7 @@ body {
 /* Loading 进度条 (PDF 还在下载时,贴在顶栏下沿) */
 .progress-bar {
   position: fixed;
-  top: calc(24px + env(safe-area-inset-top, 0px));
+  top: calc(36px + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   height: 2px;
