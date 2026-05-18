@@ -1048,17 +1048,50 @@ main().catch((e) => {
 
 // ── Service worker registration ──────────────────────────────────────────
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("./service-worker.js")
-      .then((reg) => console.log("SW registered", reg.scope))
-      .catch((e) => console.warn("SW register failed", e));
-  });
+// SW 注册 + 热更新检测。三条检测路径,各覆盖不同场景:
+//   A. fetch handler 里 eTag/length diff → postMessage "asset-updated"
+//      → 适合:tab 一直开着,SW 后台 revalidate 发现新版本
+//   B. registration.updatefound + newWorker.statechange="installed"
+//      → 适合:本次访问期间发现 SW 源换了(主要触发路径)
+//   C. 启动时 registration.waiting 已存在 + 当前 controller 存在
+//      → 适合:上次访问已装好新 SW 但当时用户没刷,这次冷启动直接报
+//
+// iOS PWA 关键:从主屏冷启动,fetch 多半全走 cache(A 不 fire),靠 B/C 兜底。
+// 本地开发不注册 SW(F5 时缓存会捣乱)。
+const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
+
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
+  // A
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "asset-updated") {
-      // GH Pages 上 site 自己有新版本 → 复用 update toast,标"刷新"
       showUpdateToast("site", "本站有新版本", "刷新");
     }
+  });
+
+  window.addEventListener("load", async () => {
+    let reg;
+    try {
+      reg = await navigator.serviceWorker.register("./service-worker.js");
+      console.log("SW registered", reg.scope);
+    } catch (e) {
+      console.warn("SW register failed", e);
+      return;
+    }
+
+    // C
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      showUpdateToast("site", "本站有新版本", "刷新");
+    }
+
+    // B
+    reg.addEventListener("updatefound", () => {
+      const nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener("statechange", () => {
+        if (nw.state === "installed" && navigator.serviceWorker.controller) {
+          showUpdateToast("site", "本站有新版本", "刷新");
+        }
+      });
+    });
   });
 }
