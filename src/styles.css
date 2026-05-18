@@ -107,30 +107,34 @@ body {
   scrollbar-width: auto;
   scrollbar-color: var(--accent-strong) var(--bg-1);
 }
-/* 滚动条:18px 全宽实心 (touch / Quest 控制器够大才点得中,desktop 也方便快速拖) */
-.viewer-container::-webkit-scrollbar { width: 18px; height: 18px; }
-.viewer-container::-webkit-scrollbar-track { background: var(--bg-1); }
+/* 滚动条:24px 全宽实心,!important 压住 UA 样式(Quest browser 默认 scrollbar 在我们这边太细)。
+   overflow-y: scroll 强制常驻,layout 稳定不抖。 */
+.viewer-container { overflow-y: scroll !important; }
+.viewer-container::-webkit-scrollbar { width: 24px !important; height: 24px !important; }
+.viewer-container::-webkit-scrollbar-track { background: var(--bg-1) !important; }
 .viewer-container::-webkit-scrollbar-thumb {
-  background: var(--accent-strong);
-  border-radius: 9px;
+  background: var(--accent-strong) !important;
+  border-radius: 12px !important;
+  min-height: 48px;
 }
-.viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-.viewer-container::-webkit-scrollbar-thumb:active { background: var(--accent); }
-.viewer-container::-webkit-scrollbar-corner { background: var(--bg-1); }
+.viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent) !important; }
+.viewer-container::-webkit-scrollbar-thumb:active { background: var(--accent) !important; }
+.viewer-container::-webkit-scrollbar-corner { background: var(--bg-1) !important; }
 
-/* Drawer / outline 列表用同样规格 */
+/* Drawer / outline 列表同规格 */
 .doc-list, .outline-list {
   scrollbar-width: auto;
   scrollbar-color: var(--accent-strong) var(--bg-1);
 }
-.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 18px; }
-.doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: var(--bg-1); }
+.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 18px !important; }
+.doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: var(--bg-1) !important; }
 .doc-list::-webkit-scrollbar-thumb, .outline-list::-webkit-scrollbar-thumb {
-  background: var(--accent-strong);
-  border-radius: 9px;
+  background: var(--accent-strong) !important;
+  border-radius: 9px !important;
+  min-height: 40px;
 }
 .doc-list::-webkit-scrollbar-thumb:hover, .outline-list::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
+  background: var(--accent) !important;
 }
 
 /* pdf.js 的 .pdfViewer 内部布局 */
