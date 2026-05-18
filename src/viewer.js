@@ -15,14 +15,17 @@ const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
 // fallback CDN
 const PDFJS_BASE_FB = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}`;
 
-const ZOOM_KEY_PREFIX = "jrp.zoom:";  // per-doc + per-spread-mode,key 形如 jrp.zoom:<docId>:<mode>
+// per-doc + per-spread-mode 的缩放偏好,**存的是相对 cozy 的倍率**(factor),不是绝对 scale。
+// 这样换窗口尺寸 / 横竖屏 / 设备,"我喜欢比 fit 大 X%" 永远成立。
+// 新 prefix jrp.zoomf: 跟旧 jrp.zoom: 区分,旧的(绝对 scale)直接忽略不读。
+const ZOOM_FACTOR_KEY_PREFIX = "jrp.zoomf:";
 
-function zoomKey(docId, mode) {
-  return `${ZOOM_KEY_PREFIX}${docId}:${mode ?? 0}`;
+function zoomFactorKey(docId, mode) {
+  return `${ZOOM_FACTOR_KEY_PREFIX}${docId}:${mode ?? 0}`;
 }
-function currentZoomKey() {
+function currentZoomFactorKey() {
   if (!currentDocId) return null;
-  return zoomKey(currentDocId, viewer?.spreadMode ?? 0);
+  return zoomFactorKey(currentDocId, viewer?.spreadMode ?? 0);
 }
 const SPREAD_KEY = "jrp.spread";  // "0" (none) | "1" (odd: 单封面后 2+3...) | "2" (even: 1+2, 3+4...)
 
@@ -89,10 +92,28 @@ function applyAutoFit() {
   programmaticScale = false;
 }
 
-// 显式 fit-width 按钮:清掉本论文 + 当前 mode 的保存值 + auto-fit 重新算
+// 应用 (saved factor × current cozy) 或 fallback 到 auto-fit。
+// factor 是相对 cozy 的倍率,跨窗口语义一致。
+function applySavedZoomOrAutoFit() {
+  if (!viewer) return;
+  const k = currentZoomFactorKey();
+  const raw = k ? localStorage.getItem(k) : null;
+  const factor = raw ? parseFloat(raw) : NaN;
+  const cozy = computeCozyScale();
+  programmaticScale = true;
+  if (Number.isFinite(factor) && factor > 0 && cozy) {
+    const s = Math.max(0.1, Math.min(8, factor * cozy));
+    viewer.currentScale = s;
+  } else {
+    viewer.currentScale = cozy ?? 1.0;
+  }
+  programmaticScale = false;
+}
+
+// 显式 fit-width 按钮:清掉本论文 + 当前 mode 的保存 factor + auto-fit 重新算
 export function fitToWidth() {
   if (!viewer) return;
-  const k = currentZoomKey();
+  const k = currentZoomFactorKey();
   if (k) { try { localStorage.removeItem(k); } catch (_) {} }
   applyAutoFit();
 }
@@ -106,22 +127,14 @@ export function zoomBy(factor) {
 }
 
 // Spread mode: 0=单页,1=封面单页+后续双页(odd),2=全程双页(even)。
-// 切换后:看新 mode 有没有自己保存的 zoom,有就用,没有就 auto-fit。reading-line 保留。
+// 切换后:看新 mode 有没有自己保存的 factor,有就 factor × 新 cozy,没有就 cozy。
 export function setSpreadMode(mode) {
   if (!viewer) return;
   const pos = currentPosition();
   viewer.spreadMode = mode;
   try { localStorage.setItem(SPREAD_KEY, String(mode)); } catch (_) {}
   requestAnimationFrame(() => {
-    const k = currentDocId ? zoomKey(currentDocId, mode) : null;
-    const saved = k ? localStorage.getItem(k) : null;
-    if (saved) {
-      programmaticScale = true;
-      viewer.currentScaleValue = saved;
-      programmaticScale = false;
-    } else {
-      applyAutoFit();
-    }
+    applySavedZoomOrAutoFit();
     requestAnimationFrame(() => {
       if (pos) restorePosition(pos);
     });
@@ -415,16 +428,8 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
       const n = parseInt(savedSpread, 10);
       if (n === 0 || n === 1 || n === 2) viewer.spreadMode = n;
     }
-    // 应用 per-paper + per-mode zoom (key 包含 spread mode,避免单页 saved zoom 在双页模式下放大 2 倍)
-    const k = currentZoomKey();
-    const savedZoom = k ? localStorage.getItem(k) : null;
-    if (savedZoom) {
-      programmaticScale = true;
-      viewer.currentScaleValue = savedZoom;
-      programmaticScale = false;
-    } else {
-      applyAutoFit();
-    }
+    // 应用 per-paper + per-mode 缩放偏好 (factor × cozy);没有就 cozy
+    applySavedZoomOrAutoFit();
     // pages 都 init 完了,如果有 pendingRestore 立刻执行
     if (pendingRestore) {
       const p = pendingRestore;
@@ -447,19 +452,17 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
     if (overviewOn) markCurrentThumb();
   });
 
-  // 用户改了 zoom → 保存到 per-doc key。programmaticScale 期间不存(避免
-  // cozy 默认值被持久化,这样换设备 / 切 spread 时还能重新 auto-fit)。
+  // 用户手动 zoom → 存 factor = 当前 scale / cozy。programmaticScale 期间不存。
+  // 存 factor (相对 cozy 倍率) 而不是绝对 scale,让换窗口尺寸时偏好仍然合理。
   eventBus.on("scalechanging", (evt) => {
     if (programmaticScale) return;
-    const k = currentZoomKey();
+    const k = currentZoomFactorKey();
     if (!k) return;
-    try {
-      const val = viewer.currentScaleValue;
-      const out = (typeof val === "string" && isNaN(parseFloat(val)))
-        ? val
-        : String(evt.scale);
-      localStorage.setItem(k, out);
-    } catch (_) {}
+    const cozy = computeCozyScale();
+    if (!cozy) return;
+    const factor = (evt.scale ?? viewer.currentScale) / cozy;
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    try { localStorage.setItem(k, String(Math.max(0.1, Math.min(8, factor)))); } catch (_) {}
   });
 
   // Ctrl/Cmd + wheel = zoom。否则放过让原生 scroll 走。
@@ -482,10 +485,9 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
   let autoFitGuard = false;
   const ro = new ResizeObserver(() => {
     if (!currentPdf || !currentDocId || autoFitGuard) return;
-    const k = currentZoomKey();
-    if (k && localStorage.getItem(k)) return;
     autoFitGuard = true;
-    try { applyAutoFit(); } catch (_) {}
+    // 始终 re-apply (factor × 新 cozy):没 factor 也走 cozy
+    try { applySavedZoomOrAutoFit(); } catch (_) {}
     requestAnimationFrame(() => requestAnimationFrame(() => { autoFitGuard = false; }));
   });
   ro.observe(container);

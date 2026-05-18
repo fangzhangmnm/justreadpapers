@@ -965,15 +965,20 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// 在缩略图上点击 → 主 viewer 跳到对应页 + 退出概览 + 立刻 flush (明确意图)
+// 在缩略图上点击 → 退出概览 + 主 viewer 跳到对应页 + 立刻 flush (明确意图)
+// 注意:必须先 setOverviewVisible(false),否则 viewer container 还是 display:none,
+// pdf.js 的 scrollIntoView no-op,跳不动。
 thumbContainer.addEventListener("click", (e) => {
   const thumb = e.target.closest(".thumb-card");
   if (!thumb) return;
   const pn = parseInt(thumb.dataset.pageNumber, 10);
   if (!pn || isNaN(pn)) return;
   e.preventDefault();
-  goToPage(pn);
   setOverviewVisible(false);
+  // 等 layout 把 viewer container 恢复可见,再跳页
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => goToPage(pn));
+  });
   if (outlineJumpFlushTimer) clearTimeout(outlineJumpFlushTimer);
   outlineJumpFlushTimer = setTimeout(() => {
     outlineJumpFlushTimer = null;
