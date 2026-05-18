@@ -56,8 +56,25 @@ let programmaticScale = false;
 // 下限 scale 0.1 让真窄的屏不被卡住。
 const TARGET_INCHES_PER_PAGE = 9;
 const CSS_PX_PER_INCH = 96;
-// 容器宽度里给 .page / .spread 的 1px border 各两侧 + 一点呼吸,够避免 1-2px 横向溢出
+// page / spread 1px 边 + 少量呼吸
 const PAGE_BORDER_RESERVE = 4;
+
+// 检测原生滚动条占不占空间(classic = ~15-18px;overlay scrollbar = 0)。
+// 用来在 layout 算 fit 时预留好垂直滚动条的位置,避免"先 fit 满 → scrollbar 出来 → 横向溢出"那一帧的抖动。
+let _scrollbarWidth = null;
+function detectScrollbarWidth() {
+  if (_scrollbarWidth != null) return _scrollbarWidth;
+  try {
+    const d = document.createElement("div");
+    d.style.cssText = "width:50px;height:50px;overflow:scroll;position:absolute;top:-9999px;visibility:hidden;";
+    document.body.appendChild(d);
+    _scrollbarWidth = d.offsetWidth - d.clientWidth;
+    document.body.removeChild(d);
+  } catch (_) {
+    _scrollbarWidth = 0;
+  }
+  return _scrollbarWidth;
+}
 
 function computeCozyScale() {
   try {
@@ -66,7 +83,14 @@ function computeCozyScale() {
     const vp = pv.viewport;
     if (!vp) return null;
     const naturalCssWidth = vp.width / vp.scale;
-    const availCss = container.clientWidth - PAGE_BORDER_RESERVE;
+
+    // 多页 PDF 必然出 vertical scrollbar。如果当前 clientWidth 已经把 scrollbar 减掉了(offsetWidth > clientWidth),
+    // 不再重复减;否则减掉一份 scrollbar width 预留(避免 fit → scrollbar 出来 → 横向溢出)。
+    const sbw = detectScrollbarWidth();
+    const scrollbarShowing = container.offsetWidth - container.clientWidth >= sbw - 1 && sbw > 0;
+    const scrollbarReserve = (sbw > 0 && !scrollbarShowing) ? sbw : 0;
+    const availCss = container.clientWidth - PAGE_BORDER_RESERVE - scrollbarReserve;
+
     const isSpread = !!(viewer.spreadMode && viewer.spreadMode !== 0);
     const pagesPerRow = isSpread ? 2 : 1;
     const targetCss = Math.min(
