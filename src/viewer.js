@@ -515,14 +515,16 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
   // 容器尺寸变了(横竖屏切换 / 滚动条出现导致 clientWidth 缩 / 窗口 resize)→
   // 重新跑一次 auto-fit。但只在用户没手动 zoom 这篇时 (有保存值代表手动,不去打扰)。
   let autoFitGuard = false;
-  const ro = new ResizeObserver(() => {
+  const refit = () => {
     if (!currentPdf || !currentDocId || autoFitGuard) return;
     autoFitGuard = true;
-    // 始终 re-apply (factor × 新 cozy):没 factor 也走 cozy
     try { applySavedZoomOrAutoFit(); } catch (_) {}
     requestAnimationFrame(() => requestAnimationFrame(() => { autoFitGuard = false; }));
-  });
+  };
+  const ro = new ResizeObserver(refit);
   ro.observe(container);
+  // window.resize 作 belt-and-suspenders:某些 Quest / 老移动端浏览器 RO 不是每次都 fire
+  window.addEventListener("resize", refit);
 
   scrollHandler = () => {
     // restore 期间不要回报 (防止覆盖即将恢复到的位置)
