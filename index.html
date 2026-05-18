@@ -37,6 +37,19 @@
         <div class="fill" id="progressFill"></div>
       </div>
 
+      <!-- 拖拽上传 overlay (dragenter 时显示) -->
+      <div id="dropOverlay" class="drop-overlay hidden" aria-hidden="true">
+        <div class="drop-card">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <p class="drop-title">松手即上传</p>
+          <p class="drop-hint">PDF 会进 approot/papers/,并打开最后一份</p>
+        </div>
+      </div>
+
       <!-- 顶栏:菜单按钮 + 当前论文标题 + 状态 -->
       <header class="top-bar auto-hide" id="topBar">
         <button class="icon-button" id="menuButton" type="button" aria-label="文件菜单" title="文件菜单">

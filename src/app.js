@@ -66,6 +66,7 @@ const updateToast = $("updateToast");
 const updateToastReload = $("updateToastReload");
 const updateToastDismiss = $("updateToastDismiss");
 const idleOverlay = $("idleOverlay");
+const dropOverlay = $("dropOverlay");
 
 // ── UI state ─────────────────────────────────────────────────────────────
 
@@ -726,6 +727,56 @@ logoutButton.addEventListener("click", async () => {
 
 updateToastReload.addEventListener("click", applyRemoteUpdate);
 updateToastDismiss.addEventListener("click", hideUpdateToast);
+
+// ── Drag-and-drop 上传 ───────────────────────────────────────────────────
+// 监听整个 window,因为 dragleave 在进入子元素时也会 fire 一次,得用 counter
+// 防抖。dragover 必须 preventDefault,否则 drop 不会触发。
+
+let dragDepth = 0;
+
+function dtHasFiles(dt) {
+  if (!dt) return false;
+  if (dt.types) {
+    for (const t of dt.types) {
+      if (t === "Files" || t === "application/x-moz-file") return true;
+    }
+  }
+  return false;
+}
+
+window.addEventListener("dragenter", (e) => {
+  if (!dtHasFiles(e.dataTransfer)) return;
+  e.preventDefault();
+  dragDepth += 1;
+  dropOverlay.classList.remove("hidden");
+});
+
+window.addEventListener("dragover", (e) => {
+  if (!dtHasFiles(e.dataTransfer)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+});
+
+window.addEventListener("dragleave", (e) => {
+  if (!dtHasFiles(e.dataTransfer)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dropOverlay.classList.add("hidden");
+});
+
+window.addEventListener("drop", (e) => {
+  if (!dtHasFiles(e.dataTransfer)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  dropOverlay.classList.add("hidden");
+  const files = Array.from(e.dataTransfer.files || []).filter(
+    (f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf",
+  );
+  if (files.length === 0) {
+    setSyncStatus("不是 PDF,忽略");
+    return;
+  }
+  uploadFiles(files);
+});
 
 // ── Main ─────────────────────────────────────────────────────────────────
 
