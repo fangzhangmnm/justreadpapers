@@ -29,6 +29,8 @@ let currentDocId = null;
 let pendingRestore = null;
 let scrollHandler = null;
 let onPositionChange = null;
+let onPagePeek = null;       // realtime,每帧报当前 pageIndex (rAF throttled)
+let pagePeekRaf = null;
 let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
@@ -157,10 +159,11 @@ async function ensureLib() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}/build/pdf.worker.mjs`;
 }
 
-export async function initViewer({ containerEl, onPosition }) {
+export async function initViewer({ containerEl, onPosition, onPagePeek: opp }) {
   await ensureLib();
   container = containerEl;
   onPositionChange = onPosition;
+  onPagePeek = opp || null;
 
   // 设备 / 容器维度日志 —— Quest / 高分屏 / 大屏调试用
   try {
@@ -254,6 +257,15 @@ export async function initViewer({ containerEl, onPosition }) {
   scrollHandler = () => {
     // restore 期间不要回报 (防止覆盖即将恢复到的位置)
     if (isRestoring) return;
+    // 快路径:rAF 节流的 page peek (只报 pageIndex,给 UI 显示用 — 不存盘)
+    if (onPagePeek && !pagePeekRaf) {
+      pagePeekRaf = requestAnimationFrame(() => {
+        pagePeekRaf = null;
+        const p = currentPosition();
+        if (p) onPagePeek(p.pageIndex);
+      });
+    }
+    // 慢路径:500ms debounce,报完整 {pageIndex, yFraction} 给 session
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;

@@ -46,6 +46,8 @@ let dirty = false;
 let firstDirtyAt = 0; // 用于 debounce-with-ceiling:即使一直在脏,也保证 HEARTBEAT 后强推
 let writeTimer = null;
 let writeInFlight = null; // Promise of current PUT,避免重叠 PUT
+let lastSyncedAt = 0;     // 上次成功 PUT 的 timestamp,UI 用来显示"已同步 HH:MM"
+let lastError = null;     // 最近一次 flush 的错误,UI 显示
 let listeners = new Set();
 // 上一次"成功推到 OneDrive"时每篇 doc 的 position。用于 trivial-skip 判断:
 // 同页 + |yFraction Δ| 小 → 内存改了但不调度 PUT,等下一次 meaningful change 或
@@ -65,6 +67,16 @@ export function subscribe(fn) {
 
 export function getState() {
   return state;
+}
+
+// 给 UI 用 —— 抄 webxiaoheiwu 的 status pattern
+export function getSyncSnapshot() {
+  return {
+    dirty,
+    writeInFlight: !!writeInFlight,
+    lastSyncedAt,
+    lastError,
+  };
 }
 
 // ── init ──────────────────────────────────────────────────────────────────
@@ -214,14 +226,17 @@ export async function flush() {
       const item = await writeApprootJson(SESSION_FILE, snapshot, eTagAtSnapshot);
       knownETag = item.eTag;
       capturePushedPositions(snapshot);
+      lastSyncedAt = Date.now();
+      lastError = null;
     } catch (e) {
       if (e.status === 412) {
-        // 远端被另一设备改了 —— merge + retry 一次 (mergeRemoteAndRetry 内部成功也会更新 lastPushedPositions)
+        // 远端被另一设备改了 —— merge + retry 一次 (mergeRemoteAndRetry 内部成功也会更新 lastPushedPositions / lastSyncedAt)
         await mergeRemoteAndRetry(snapshot);
       } else {
         // 网络 / 5xx → 标 dirty 让下次再试,ceiling 起点恢复
         dirty = true;
         if (firstDirtyAt === 0) firstDirtyAt = ceilingMarkAtSnapshot || Date.now();
+        lastError = e?.message || String(e);
         throw e;
       }
     }

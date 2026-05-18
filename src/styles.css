@@ -205,6 +205,16 @@ body {
   gap: 4px;
 }
 .top-bar .status .sep { opacity: 0.4; }
+#syncStatus.error { color: var(--danger); }
+#syncStatus.unsynced { color: var(--accent-strong); }
+#syncStatus.syncing {
+  color: var(--accent);
+  animation: jrp-status-pulse 1.4s ease-in-out infinite;
+}
+@keyframes jrp-status-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
 
 /* ── Drawer (file panel) ─────────────────────────────────────── */
 

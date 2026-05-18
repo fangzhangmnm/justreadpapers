@@ -16,7 +16,7 @@ import {
 import {
   initSession, getState, setPosition, setLastActive, ensureDoc,
   forgetDoc, getPosition, flush, flushKeepalive, checkRemoteChanged,
-  reloadFromRemote, subscribe,
+  reloadFromRemote, subscribe, getSyncSnapshot,
 } from "./session.js";
 import * as cache from "./cache.js";
 import {
@@ -115,9 +115,46 @@ function fmtDate(ts) {
   return `${y}-${m}-${dd}`;
 }
 
-function setSyncStatus(text) {
+// xiaoheiwu-style status:setSyncStatus 写的是 transient (默认 2s,error 5s),
+// 之后 tickSyncStatus 会接管,根据 session 实际状态 (dirty / writeInFlight /
+// lastSyncedAt) 计算出 "未同步 / 同步中… / 已同步 HH:MM / 就绪 / 未登录" 这些。
+let statusTransientUntil = 0;
+function setSyncStatus(text, opts = {}) {
   syncStatus.textContent = text;
+  syncStatus.classList.toggle("error", !!opts.error);
+  syncStatus.classList.toggle("unsynced", !!opts.unsynced);
+  syncStatus.classList.toggle("syncing", !!opts.syncing);
+  if (opts.sticky !== true) {
+    statusTransientUntil = Date.now() + (opts.duration || (opts.error ? 5000 : 1800));
+  }
 }
+
+function fmtHM(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function computeSyncStatus() {
+  if (!isSignedIn()) return { text: "未登录" };
+  if (!currentDocId) return { text: "就绪" };
+  const s = getSyncSnapshot();
+  if (s.lastError && s.dirty) return { text: "同步失败 · 重试中", error: true };
+  if (s.writeInFlight) return { text: "同步中…", syncing: true };
+  if (s.dirty) return { text: "未同步", unsynced: true };
+  if (s.lastSyncedAt > 0) return { text: `已同步 ${fmtHM(s.lastSyncedAt)}` };
+  return { text: "synced" };
+}
+
+function tickSyncStatus() {
+  if (Date.now() < statusTransientUntil) return;
+  const r = computeSyncStatus();
+  // 写文本同时清掉旧的 class
+  syncStatus.textContent = r.text;
+  syncStatus.classList.toggle("error", !!r.error);
+  syncStatus.classList.toggle("unsynced", !!r.unsynced);
+  syncStatus.classList.toggle("syncing", !!r.syncing);
+}
+setInterval(tickSyncStatus, 500);
 
 function showProgress(v) {
   if (v == null) {
@@ -360,7 +397,7 @@ function startRename(rowEl, item) {
       await renderDocList();
     } catch (e) {
       console.warn("rename 失败", e);
-      setSyncStatus(`改名失败: ${e.message}`);
+      setSyncStatus(`改名失败: ${e.message}`, { error: true });
       cancel();
     }
   };
@@ -411,7 +448,7 @@ async function trashPaper(item) {
     await renderDocList();
   } catch (e) {
     console.warn("trash 失败", e);
-    setSyncStatus(`移动失败: ${e.message}`);
+    setSyncStatus(`移动失败: ${e.message}`, { error: true });
   }
 }
 
@@ -426,7 +463,7 @@ async function restorePaper(item) {
     await renderDocList();
   } catch (e) {
     console.warn("restore 失败", e);
-    setSyncStatus(`还原失败: ${e.message}`);
+    setSyncStatus(`还原失败: ${e.message}`, { error: true });
   }
 }
 
@@ -441,7 +478,7 @@ async function purgePaper(item) {
     await renderDocList();
   } catch (e) {
     console.warn("purge 失败", e);
-    setSyncStatus(`删除失败: ${e.message}`);
+    setSyncStatus(`删除失败: ${e.message}`, { error: true });
   }
 }
 
@@ -458,7 +495,7 @@ async function emptyAllTrash() {
     await renderDocList();
   } catch (e) {
     console.warn("empty trash 失败", e);
-    setSyncStatus(`失败: ${e.message}`);
+    setSyncStatus(`失败: ${e.message}`, { error: true });
   }
 }
 
@@ -491,7 +528,7 @@ async function openPaper(item) {
       });
     } catch (e) {
       console.warn("下载失败", e);
-      setSyncStatus(`下载失败: ${e.message}`);
+      setSyncStatus(`下载失败: ${e.message}`, { error: true });
       showProgress(null);
       showLanding({
         title: "加载失败",
@@ -507,8 +544,8 @@ async function openPaper(item) {
   try {
     const pos = getPosition(item.id);
     await loadPdf({ docId: item.id, data: blob, position: pos });
-    setSyncStatus("synced");
-    updatePageStatus();
+    // 页号让 onPagePeek 自己跑;sync status 让 tickSyncStatus 接管。这里不主动写。
+    if (pos) pageStatus.textContent = `p.${pos.pageIndex + 1}`;
     // 高亮 drawer 里这一行(下次 render 也会高亮)
     for (const el of docList.querySelectorAll(".doc-row.active")) {
       el.classList.remove("active");
@@ -519,18 +556,16 @@ async function openPaper(item) {
     refreshOutline();
   } catch (e) {
     console.warn("loadPdf 失败", e);
-    setSyncStatus(`渲染失败: ${e.message}`);
+    setSyncStatus(`渲染失败: ${e.message}`, { error: true });
     showLanding({ title: "渲染失败", hint: e.message, showUpload: false });
     outlineButton.hidden = true;
     renderOutline([]);
   }
 }
 
-function updatePageStatus() {
-  const p = currentPosition();
-  if (!p) { pageStatus.textContent = ""; return; }
-  // 显示 1-based 页号
-  pageStatus.textContent = `p.${p.pageIndex + 1}`;
+// 顶栏页号:rAF 节流,直接从 viewer onPagePeek 来。realtime,不 debounce。
+function onPagePeekFromViewer(pageIndex) {
+  if (currentDocId) pageStatus.textContent = `p.${pageIndex + 1}`;
 }
 
 // ── Outline (PDF 章节目录) ───────────────────────────────────────────────
@@ -651,7 +686,7 @@ async function uploadFiles(files) {
     }
   } catch (e) {
     console.warn("upload 失败", e);
-    setSyncStatus(`上传失败: ${e.message}`);
+    setSyncStatus(`上传失败: ${e.message}`, { error: true });
     showProgress(null);
     alert(`上传失败: ${e.message}`);
   }
@@ -786,7 +821,7 @@ async function applyRemoteUpdate() {
     }
     setSyncStatus("synced");
   } catch (e) {
-    setSyncStatus(`同步失败: ${e.message}`);
+    setSyncStatus(`同步失败: ${e.message}`, { error: true });
   }
 }
 
@@ -992,6 +1027,7 @@ async function main() {
   await initViewer({
     containerEl: viewerContainer,
     onPosition: onPositionFromViewer,
+    onPagePeek: onPagePeekFromViewer,
   });
 
   let authResult;
@@ -1032,7 +1068,7 @@ async function main() {
     setSyncStatus("synced");
   } catch (e) {
     console.warn("init session 失败", e);
-    setSyncStatus(`session 加载失败: ${e.message}`);
+    setSyncStatus(`session 加载失败: ${e.message}`, { error: true });
   }
 
   await jumpscare();
@@ -1043,7 +1079,7 @@ async function main() {
 
 main().catch((e) => {
   console.error("启动失败", e);
-  setSyncStatus(`启动失败: ${e.message}`);
+  setSyncStatus(`启动失败: ${e.message}`, { error: true });
 });
 
 // ── Service worker registration ──────────────────────────────────────────
