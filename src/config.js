@@ -2,7 +2,7 @@
 // 需要单独的注册 (跟 webxiaoheiwu / background radio 共一个 OneDrive 账户但不同 redirect URI)。
 // 部署前在 https://entra.microsoft.com → App registrations → 新建,把 redirect URI 设为
 // https://fangzhangmnm.github.io/justreadpapers/ 和 http://localhost:* (本地测试)。
-export const CLIENT_ID = "__REPLACE_WITH_AZURE_AD_CLIENT_ID__";
+export const CLIENT_ID = "8b5063a4-6fd4-40d0-8973-fb6388a6db24";
 
 // common = 个人 + 组织账号都能登
 export const AUTHORITY = "https://login.microsoftonline.com/common";
