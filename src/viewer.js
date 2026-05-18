@@ -49,14 +49,13 @@ let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
-// 每页阅读宽度上限 9 英寸(@ 96 CSS px/inch = 864 px ≈ A4 全宽)。
-// 单页:render 单元 = 1 页 → 上限 9";
-// 双页:render 单元 = 2 页 → 上限 18" → 每页 ≤ 9"。
-// 容器比上限小就 fit 容器(原则:大屏不占满,小屏占满,Quest / phone / spread 同理)。
-// 下限 scale 0.1 让真窄的屏不被卡住。
+// 每页阅读宽度上限 9 英寸 (cap = max page render width)。
+// target = min(availCss, cap):
+//   小容器 < cap → target = availCss → 页填容器
+//   大容器 > cap → target = cap → 页 = 9",留白
+// 之前的 bug 不是 min/max 反了,是 naturalCssWidth 单位算错 (PDF pt 当 CSS px),s 大 33%。
 const TARGET_INCHES_PER_PAGE = 9;
 const CSS_PX_PER_INCH = 96;
-// page / spread 1px 边 + 少量呼吸
 const PAGE_BORDER_RESERVE = 4;
 
 // 检测原生滚动条占不占空间(classic = ~15-18px;overlay scrollbar = 0)。
@@ -76,28 +75,37 @@ function detectScrollbarWidth() {
   return _scrollbarWidth;
 }
 
+// pdf.js internal:viewport.scale = userScale × (96/72),viewport.width 已经是 CSS px。
+// 所以 vp.width / vp.scale = PDF points (不是 CSS px)。要换回 CSS px 必须 × 96/72。
+const PDF_TO_CSS_UNITS = 96 / 72;
+
 function computeCozyScale() {
   try {
     const pv = viewer.getPageView(0);
     if (!pv) return null;
-    const vp = pv.viewport;
-    if (!vp) return null;
-    const naturalCssWidth = vp.width / vp.scale;
+    // 优先用 pdfPage.view (PDF 原始 bbox,单位 pt),不依赖 viewport 当前 scale 状态
+    let naturalCssWidth;
+    if (pv.pdfPage?.view) {
+      const view = pv.pdfPage.view;
+      const pageWidthPts = view[2] - view[0];
+      naturalCssWidth = pageWidthPts * PDF_TO_CSS_UNITS;
+    } else if (pv.viewport) {
+      // fallback (理论上 pagesinit 时 pdfPage 已设好):从 viewport 反推
+      naturalCssWidth = pv.viewport.width * PDF_TO_CSS_UNITS / pv.viewport.scale;
+    } else {
+      return null;
+    }
 
-    // 多页 PDF 必然出 vertical scrollbar。如果当前 clientWidth 已经把 scrollbar 减掉了(offsetWidth > clientWidth),
-    // 不再重复减;否则减掉一份 scrollbar width 预留(避免 fit → scrollbar 出来 → 横向溢出)。
     const sbw = detectScrollbarWidth();
     const scrollbarShowing = container.offsetWidth - container.clientWidth >= sbw - 1 && sbw > 0;
     const scrollbarReserve = (sbw > 0 && !scrollbarShowing) ? sbw : 0;
     const availCss = container.clientWidth - PAGE_BORDER_RESERVE - scrollbarReserve;
+    if (availCss <= 0) return null;
 
     const isSpread = !!(viewer.spreadMode && viewer.spreadMode !== 0);
     const pagesPerRow = isSpread ? 2 : 1;
-    const targetCss = Math.min(
-      availCss,
-      TARGET_INCHES_PER_PAGE * pagesPerRow * CSS_PX_PER_INCH,
-    );
-    if (targetCss <= 0) return null;
+    const cap = TARGET_INCHES_PER_PAGE * pagesPerRow * CSS_PX_PER_INCH;
+    const targetCss = Math.min(availCss, cap);  // 上限:不让页比 cap 大;下限:不超过容器
     const s = targetCss / (naturalCssWidth * pagesPerRow);
     return Math.max(0.1, Math.min(4, s));
   } catch (_) {
