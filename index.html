@@ -37,10 +37,8 @@
         <div id="viewer" class="pdfViewer"></div>
       </div>
 
-      <!-- 缩略图概览(全屏覆盖,默认隐藏)。pdf.js 接管 #thumbnailViewer -->
-      <div id="thumbContainer" class="thumb-container hidden">
-        <div id="thumbnailViewer" class="pdfThumbnailViewer"></div>
-      </div>
+      <!-- 缩略图概览(全屏覆盖,默认隐藏)。自己 roll grid + IntersectionObserver 懒渲染 -->
+      <div id="thumbContainer" class="thumb-container hidden"></div>
 
       <!-- 落地空态(没登录 / 没论文 / 加载失败) -->
       <div id="emptyLanding" class="empty-landing hidden" aria-live="polite">

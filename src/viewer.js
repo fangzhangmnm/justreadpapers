@@ -38,16 +38,12 @@ let saveTimer = null;
 let saveDelayMs = 500;  // scroll 停 → 算 position → 报 setPosition (内存),再交给 session 节流
 let programmaticScale = false;
 
-// 目标 CSS 阅读宽度:9 英寸 @ 96 CSS px/inch ≈ 864 px (≈ A4 全宽)。
-// 不超过容器,下限 0.1 让窄屏真的缩到 fit-width。
+// 目标 CSS 阅读宽度上限 18 英寸(@ 96 CSS px/inch = 1728 px)。
+// 单页模式:整页 ≤ 18";spread 模式:整 spread ≤ 18" → 每页 ≤ 9"。
+// 容器比 18" 小就 fit 容器。下限 scale 0.1 让 phone / Quest 真能缩到 fit-width。
 //
-// DPI 自动适配:
-//  - Quest browser:perceived CSS px 物理更大(虚拟屏放得近),所以同样的 CSS px
-//    在 Quest 看起来比 desktop 大。把目标乘以 0.7 (即目标 ~6 英寸) 来补偿。
-//  - 手机:窄屏会被 availCss 自然 cap,不用额外补偿。
-//  - HiDPI 桌面 (4K 等):CSS px 仍然 ≈ 1/96 inch (DPR 自动补偿物理像素密度),
-//    cozy 目标 ≈ 9 英寸物理,在 50" 4K 上看起来约 9% 宽度,合理。
-const TARGET_INCHES_BASE = 9;
+// DPI 适配:Quest perceived CSS px 物理偏大,目标 ×0.7。
+const TARGET_INCHES_BASE = 18;
 const CSS_PX_PER_INCH = 96;
 
 function detectUaScaleFactor() {
@@ -64,13 +60,10 @@ function computeCozyScale() {
     if (!vp) return null;
     const naturalCssWidth = vp.width / vp.scale;
     const availCss = container.clientWidth - 32;
-    // spread 模式下 "fit width" 的"页"是一对页(= 2 × 单页宽);
-    // 同时 cozy 的 9" 上限也只对单页有意义(双页贴满容器才看得清字),所以 spread 模式不 cap inch。
     const isSpread = !!(viewer.spreadMode && viewer.spreadMode !== 0);
+    // spread 模式下 "fit width" 的"页"是一对页(= 2 × 单页宽)
     const effectiveNatural = naturalCssWidth * (isSpread ? 2 : 1);
-    const targetCss = isSpread
-      ? availCss
-      : Math.min(availCss, TARGET_INCHES_BASE * detectUaScaleFactor() * CSS_PX_PER_INCH);
+    const targetCss = Math.min(availCss, TARGET_INCHES_BASE * detectUaScaleFactor() * CSS_PX_PER_INCH);
     if (targetCss <= 0) return null;
     const s = targetCss / effectiveNatural;
     return Math.max(0.1, Math.min(4, s));
@@ -126,17 +119,125 @@ export function getSpreadMode() {
   return viewer?.spreadMode ?? 0;
 }
 
-// 概览模式:pdfjs-dist v4 没暴露 PDFThumbnailViewer,先 stub,
-// 等改方案(自己 roll grid 或换实现)再启用。
+// 概览模式 —— pdfjs-dist 不暴露 PDFThumbnailViewer,自己 roll:
+// CSS Grid 占位 .thumb-card,IntersectionObserver 进可见区才 render 那一页的小 canvas。
+// 200 页论文也只渲染 ~10-20 张 (可视 + rootMargin 预取)。
 let overviewOn = false;
-export function setOverviewVisible(_visible) {
-  // no-op,概览功能暂时不可用
+let overviewIO = null;
+let overviewRendered = new Set();  // pageNumber → 已渲染
+let overviewBuiltForPdf = null;    // pdf instance,换论文要重建
+
+export function canOverview() {
+  return !!thumbContainer;
 }
+
 export function isOverviewVisible() {
   return overviewOn;
 }
-export function canOverview() {
-  return false;
+
+export function setOverviewVisible(visible) {
+  if (!thumbContainer || !container) return;
+  const want = !!visible;
+  if (want === overviewOn) return;
+  overviewOn = want;
+  if (overviewOn) {
+    if (overviewBuiltForPdf !== currentPdf) buildOverviewSkeleton();
+    thumbContainer.classList.remove("hidden");
+    container.classList.add("hidden");
+    attachOverviewObserver();
+    markCurrentThumb();
+    // 滚到当前页
+    const cur = viewer.currentPageNumber || 1;
+    requestAnimationFrame(() => {
+      const node = thumbContainer.querySelector(`[data-page-number="${cur}"]`);
+      if (node) node.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+  } else {
+    thumbContainer.classList.add("hidden");
+    container.classList.remove("hidden");
+    if (overviewIO) { overviewIO.disconnect(); overviewIO = null; }
+  }
+}
+
+function clearOverview() {
+  if (overviewIO) { overviewIO.disconnect(); overviewIO = null; }
+  if (thumbContainer) thumbContainer.innerHTML = "";
+  overviewRendered.clear();
+  overviewBuiltForPdf = null;
+}
+
+function buildOverviewSkeleton() {
+  clearOverview();
+  if (!currentPdf || !thumbContainer) return;
+  const np = currentPdf.numPages;
+  const frag = document.createDocumentFragment();
+  for (let i = 1; i <= np; i++) {
+    const card = document.createElement("div");
+    card.className = "thumb-card";
+    card.dataset.pageNumber = String(i);
+    card.innerHTML = `<div class="thumb-canvas-wrap"></div><div class="thumb-label">${i}</div>`;
+    frag.appendChild(card);
+  }
+  thumbContainer.appendChild(frag);
+  overviewBuiltForPdf = currentPdf;
+}
+
+function attachOverviewObserver() {
+  if (overviewIO) overviewIO.disconnect();
+  overviewIO = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const card = entry.target;
+      const pn = parseInt(card.dataset.pageNumber, 10);
+      if (!pn || overviewRendered.has(pn)) continue;
+      overviewRendered.add(pn);
+      renderThumb(card, pn).catch((e) => {
+        overviewRendered.delete(pn);
+        console.warn("thumb render", pn, e);
+      });
+    }
+  }, { root: thumbContainer, rootMargin: "400px" });
+  for (const card of thumbContainer.querySelectorAll(".thumb-card")) {
+    overviewIO.observe(card);
+  }
+}
+
+async function renderThumb(card, pn) {
+  if (!currentPdf) return;
+  const pdf = currentPdf;
+  const page = await pdf.getPage(pn);
+  // 换 PDF 了就别画了
+  if (pdf !== currentPdf) return;
+  const wrap = card.querySelector(".thumb-canvas-wrap");
+  if (!wrap) return;
+  const targetCssWidth = wrap.clientWidth || 180;
+  const vp1 = page.getViewport({ scale: 1 });
+  const scale = targetCssWidth / vp1.width;
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  // dpr cap 2 避免 200 页 × 4x 内存爆
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(vp.width * dpr);
+  canvas.height = Math.round(vp.height * dpr);
+  canvas.style.width = vp.width + "px";
+  canvas.style.height = vp.height + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  // 渲染完发现 PDF 变了/容器没了 → 丢弃
+  if (pdf !== currentPdf || !card.isConnected) return;
+  wrap.innerHTML = "";
+  wrap.appendChild(canvas);
+}
+
+function markCurrentThumb() {
+  if (!thumbContainer || !viewer) return;
+  const cur = viewer.currentPageNumber;
+  for (const el of thumbContainer.querySelectorAll(".thumb-card.current")) {
+    el.classList.remove("current");
+  }
+  const node = thumbContainer.querySelector(`[data-page-number="${cur}"]`);
+  if (node) node.classList.add("current");
 }
 
 // 程序化跳到某一页 (1-based)。从缩略图点击进来,会先用这个跳主 viewer
@@ -331,6 +432,11 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
     }
   });
 
+  // 概览模式下,主 viewer 翻页 → 高亮对应缩略图
+  eventBus.on("pagechanging", () => {
+    if (overviewOn) markCurrentThumb();
+  });
+
   // 用户改了 zoom → 保存到 per-doc key。programmaticScale 期间不存(避免
   // cozy 默认值被持久化,这样换设备 / 切 spread 时还能重新 auto-fit)。
   eventBus.on("scalechanging", (evt) => {
@@ -410,6 +516,8 @@ export async function loadPdf({ docId, data, position }) {
   currentPdf = await loadingTask.promise;
   viewer.setDocument(currentPdf);
   linkService.setDocument(currentPdf);
+  // 换论文 → 旧概览缓存全清
+  clearOverview();
   return currentPdf;
 }
 
@@ -494,6 +602,7 @@ export function teardownCurrent() {
     currentPdf = null;
   }
   if (viewer) viewer.setDocument(null);
+  clearOverview();
   currentDocId = null;
   pendingRestore = null;
 }

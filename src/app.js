@@ -967,15 +967,13 @@ document.addEventListener("keydown", (e) => {
 
 // 在缩略图上点击 → 主 viewer 跳到对应页 + 退出概览 + 立刻 flush (明确意图)
 thumbContainer.addEventListener("click", (e) => {
-  // pdf.js 的缩略图 anchor 上自带 data-page-number(每个 .thumbnail 容器)
-  const thumb = e.target.closest(".thumbnail");
+  const thumb = e.target.closest(".thumb-card");
   if (!thumb) return;
   const pn = parseInt(thumb.dataset.pageNumber, 10);
   if (!pn || isNaN(pn)) return;
   e.preventDefault();
   goToPage(pn);
   setOverviewVisible(false);
-  // 跳页是明确意图,等 scroll 沉淀 + setPosition 报告 → 立刻 push
   if (outlineJumpFlushTimer) clearTimeout(outlineJumpFlushTimer);
   outlineJumpFlushTimer = setTimeout(() => {
     outlineJumpFlushTimer = null;
@@ -1128,10 +1126,7 @@ async function main() {
     onPosition: onPositionFromViewer,
     onPagePeek: onPagePeekFromViewer,
   });
-  // 当前 pdfjs-dist ESM 没暴露 thumbnail viewer,概览按钮先藏起来
-  if (!canOverview()) {
-    overviewButton.hidden = true;
-  }
+  if (!canOverview()) overviewButton.hidden = true;
 
   let authResult;
   try {

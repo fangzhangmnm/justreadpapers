@@ -163,52 +163,57 @@ body {
   background-clip: padding-box;
 }
 
-/* PPT-式 grid:auto-fill,大屏多列,窄屏少列。最大宽度 1800px,4K 大屏不至于过密 */
-#thumbnailViewer.pdfThumbnailViewer {
+/* 自己 roll 的缩略图 grid */
+#thumbContainer {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(180px, 28vw), 1fr));
   gap: 16px;
-  max-width: 1800px;
-  margin: 0 auto;
-  /* 覆盖 pdf.js 默认的 flex 布局 */
-  padding: 0;
-  list-style: none;
+  align-content: start;
 }
+/* 内容居中 cap 在 1800px,4K 大屏左右留白 */
+#thumbContainer > * { grid-column: span 1; }
+.thumb-container > .thumb-card { max-width: 100%; }
 
-/* 每个缩略图 */
-#thumbnailViewer .thumbnail {
-  width: auto !important;
-  margin: 0 !important;
-  padding: 4px !important;
+.thumb-card {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px;
 }
-#thumbnailViewer .thumbnail a {
+.thumb-canvas-wrap {
+  border: 2px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--bg-1);
+  width: 100%;
+  /* 占位:渲染前用 A4 比例撑高度,避免布局抖动 */
+  aspect-ratio: 1 / 1.414;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: border-color 120ms ease;
+}
+.thumb-card:hover .thumb-canvas-wrap { border-color: var(--accent-strong); }
+.thumb-card.current .thumb-canvas-wrap {
+  border-color: var(--accent);
+  border-width: 3px;
+}
+.thumb-canvas-wrap canvas {
   display: block;
   width: 100%;
+  height: auto;
 }
-#thumbnailViewer .thumbnailSelectionRing {
-  border: 2px solid var(--line-strong) !important;
-  border-radius: 4px;
-  padding: 4px !important;
-  width: 100% !important;
-  height: auto !important;
-  box-sizing: border-box;
-  background: var(--bg-1);
+.thumb-label {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
 }
-#thumbnailViewer .thumbnail:hover .thumbnailSelectionRing {
-  border-color: var(--accent-strong) !important;
-}
-#thumbnailViewer .thumbnail.selected .thumbnailSelectionRing {
-  border-color: var(--accent) !important;
-  border-width: 3px !important;
-}
-#thumbnailViewer .thumbnail canvas {
-  display: block;
-  margin: 0 auto;
-  max-width: 100%;
-  height: auto !important;
+.thumb-card.current .thumb-label {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* 中键拖拽平移时的视觉 (默认光标交给 pdf.js text-layer 的 cursor:text) */
