@@ -104,6 +104,30 @@ body {
   overflow: auto;
   background: var(--bg-0);
   /* PDF.js 需要 container.position 是 absolute / relative */
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-strong) transparent;
+}
+.viewer-container::-webkit-scrollbar { width: 10px; height: 10px; }
+.viewer-container::-webkit-scrollbar-track { background: transparent; }
+.viewer-container::-webkit-scrollbar-thumb {
+  background: var(--accent-strong);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.viewer-container::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+.viewer-container::-webkit-scrollbar-corner { background: transparent; }
+
+/* Drawer / outline 里面的列表也跟上主题 */
+.doc-list, .outline-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-strong) transparent;
+}
+.doc-list::-webkit-scrollbar, .outline-list::-webkit-scrollbar { width: 8px; }
+.doc-list::-webkit-scrollbar-track, .outline-list::-webkit-scrollbar-track { background: transparent; }
+.doc-list::-webkit-scrollbar-thumb, .outline-list::-webkit-scrollbar-thumb {
+  background: var(--accent-strong);
+  border-radius: 4px;
 }
 
 /* pdf.js 的 .pdfViewer 内部布局 */
