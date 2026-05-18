@@ -23,7 +23,8 @@ import {
   initViewer, loadPdf, restorePosition, currentPosition,
   teardownCurrent, getPdfMetadata, getOutline, jumpToDest, fitToWidth,
   setSpreadMode, getSpreadMode, zoomBy,
-  setOverviewVisible, isOverviewVisible, goToPage,
+  setOverviewVisible, isOverviewVisible, goToPage, canOverview,
+  snapshotCurrentPage, extractCurrentPageText,
 } from "./viewer.js";
 import {
   PAPERS_FOLDER, TRASH_FOLDER,
@@ -35,6 +36,8 @@ const $ = (id) => document.getElementById(id);
 const viewerContainer = $("viewerContainer");
 const thumbContainer = $("thumbContainer");
 const overviewButton = $("overviewButton");
+const screenshotButton = $("screenshotButton");
+const copyTextButton = $("copyTextButton");
 const emptyLanding = $("emptyLanding");
 const emptyTitle = $("emptyTitle");
 const emptyHint = $("emptyHint");
@@ -250,12 +253,32 @@ function refreshAuthRow(account) {
 
 async function loadFolderItems() {
   if (drawerView === "papers") {
-    papersItems = await listChildren(PAPERS_FOLDER);
-    papersItems = papersItems.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    try {
+      papersItems = await listChildren(PAPERS_FOLDER);
+      papersItems = papersItems.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    } catch (e) {
+      // 离线 / Graph 失败 → 从 IndexedDB cache 列已有的论文
+      // 让飞机上也能看到本地有什么可以读
+      console.warn("listChildren failed, falling back to local cache:", e?.message);
+      const meta = await cache.listMeta().catch(() => []);
+      papersItems = meta.map((m) => ({
+        id: m.itemId,
+        name: m.name || `(unnamed ${m.itemId.slice(-6)})`,
+        file: { mimeType: "application/pdf" },
+        size: m.size || 0,
+        eTag: m.eTag || null,
+        lastModifiedDateTime: m.lastUsed ? new Date(m.lastUsed).toISOString() : null,
+        _offlineStub: true,
+      }));
+    }
     return papersItems;
   } else {
-    trashItemsCache = await listChildren(TRASH_FOLDER);
-    trashItemsCache = trashItemsCache.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    try {
+      trashItemsCache = await listChildren(TRASH_FOLDER);
+      trashItemsCache = trashItemsCache.filter((i) => i.file && /\.pdf$/i.test(i.name || ""));
+    } catch (_) {
+      trashItemsCache = [];
+    }
     return trashItemsCache;
   }
 }
@@ -870,6 +893,11 @@ window.addEventListener("pagehide", () => {
   flushKeepalive();
 });
 window.addEventListener("focus", reconcileOnFocus);
+// 重新上网 → 把离线时堆的 dirty session 推一次,并刷新论文列表
+window.addEventListener("online", () => {
+  flush().catch(() => {});
+  if (drawerView === "papers") renderDocList().catch(() => {});
+});
 
 // ── Wiring ───────────────────────────────────────────────────────────────
 
@@ -890,6 +918,44 @@ spreadButton.addEventListener("click", () => {
 
 overviewButton.addEventListener("click", () => {
   setOverviewVisible(!isOverviewVisible());
+});
+
+screenshotButton.addEventListener("click", async () => {
+  if (!currentDocId) {
+    setSyncStatus("没有正在读的论文", { error: true });
+    return;
+  }
+  if (!navigator.clipboard?.write || !window.ClipboardItem) {
+    setSyncStatus("浏览器不支持剪贴板写图", { error: true });
+    return;
+  }
+  try {
+    const blob = await snapshotCurrentPage();
+    if (!blob) { setSyncStatus("截图失败", { error: true }); return; }
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    setSyncStatus("已截图到剪贴板");
+  } catch (e) {
+    setSyncStatus(`截图失败: ${e.message}`, { error: true });
+  }
+});
+
+copyTextButton.addEventListener("click", async () => {
+  if (!currentDocId) {
+    setSyncStatus("没有正在读的论文", { error: true });
+    return;
+  }
+  if (!navigator.clipboard?.writeText) {
+    setSyncStatus("浏览器不支持剪贴板", { error: true });
+    return;
+  }
+  try {
+    const text = await extractCurrentPageText();
+    if (!text) { setSyncStatus("当前页无可提取文本", { error: true }); return; }
+    await navigator.clipboard.writeText(text);
+    setSyncStatus(`已复制 ${text.length} 字`);
+  } catch (e) {
+    setSyncStatus(`复制失败: ${e.message}`, { error: true });
+  }
 });
 
 // Esc 退出概览
@@ -1062,6 +1128,10 @@ async function main() {
     onPosition: onPositionFromViewer,
     onPagePeek: onPagePeekFromViewer,
   });
+  // 当前 pdfjs-dist ESM 没暴露 thumbnail viewer,概览按钮先藏起来
+  if (!canOverview()) {
+    overviewButton.hidden = true;
+  }
 
   let authResult;
   try {

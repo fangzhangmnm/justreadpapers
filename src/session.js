@@ -40,6 +40,19 @@ function emptyState() {
   return { lastActive: null, docs: {} };
 }
 
+// localStorage 备份:为了离线冷启动也能恢复 lastActive + 位置。
+// 每次成功 PUT 之后 + 每次本地 mutation 之后都同步写一份。
+const LOCAL_BACKUP_KEY = "jrp.session.backup";
+function writeLocalBackup() {
+  try { localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(state)); } catch (_) {}
+}
+function readLocalBackup() {
+  try {
+    const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
 let state = emptyState();
 let knownETag = null; // last server eTag we've seen (after read or successful write)
 let dirty = false;
@@ -82,23 +95,33 @@ export function getSyncSnapshot() {
 // ── init ──────────────────────────────────────────────────────────────────
 
 export async function initSession() {
-  const { data, eTag } = await readApprootJson(SESSION_FILE);
-  if (data) {
-    state = normalize(data);
-    knownETag = eTag;
-  } else {
-    state = emptyState();
-    knownETag = null;
-    // 创建空 session.json 让 eTag 早点稳定下来
-    try {
-      const item = await writeApprootJson(SESSION_FILE, state, null);
-      knownETag = item.eTag;
-    } catch (_) {
-      // 创建失败不致命 —— 下次有写需求再试
+  // 先 hydrate 离线备份(让冷启动有 lastActive 立刻可用),Graph 拿到 remote 后再 reconcile
+  const backup = readLocalBackup();
+  if (backup) {
+    state = normalize(backup);
+  }
+
+  try {
+    const { data, eTag } = await readApprootJson(SESSION_FILE);
+    if (data) {
+      state = normalize(data);
+      knownETag = eTag;
+    } else if (!backup) {
+      state = emptyState();
+      knownETag = null;
+      // 创建空 session.json 让 eTag 早点稳定下来
+      try {
+        const item = await writeApprootJson(SESSION_FILE, state, null);
+        knownETag = item.eTag;
+      } catch (_) {}
     }
+  } catch (e) {
+    // 离线 / Graph 失败 → 用本地备份继续(已经 hydrate 过了)。dirty 状态等下次成功
+    console.warn("initSession remote failed, using local backup:", e?.message);
   }
   // baseline:已经在 OneDrive 上的位置 = lastPushed,这样初始小调整不会立刻刷盘
   capturePushedPositions(state);
+  writeLocalBackup();
   notify();
   return state;
 }
@@ -189,6 +212,9 @@ export function getPosition(itemId) {
 function scheduleWrite(delay = POSITION_DEBOUNCE_MS) {
   dirty = true;
   if (firstDirtyAt === 0) firstDirtyAt = Date.now();
+  // 任何 mutation 立刻同步到 localStorage,这样即便没等到 PUT 就关页 / 离线
+  // 也能在下次 cold-start 时 hydrate 出最新本地状态
+  writeLocalBackup();
   if (writeTimer) clearTimeout(writeTimer);
   const now = Date.now();
   // debounce: 每次脏 → 重置 delay 倒计时
@@ -218,7 +244,7 @@ export async function flush() {
   dirty = false;
   const ceilingMarkAtSnapshot = firstDirtyAt;
   firstDirtyAt = 0;  // 提前 reset,这样 PUT 期间又脏会重新起 ceiling 起点
-  const snapshot = structuredClone(state);
+  const snapshot = JSON.parse(JSON.stringify(state));
   const eTagAtSnapshot = knownETag;
 
   writeInFlight = (async () => {
@@ -228,6 +254,7 @@ export async function flush() {
       capturePushedPositions(snapshot);
       lastSyncedAt = Date.now();
       lastError = null;
+      writeLocalBackup();
     } catch (e) {
       if (e.status === 412) {
         // 远端被另一设备改了 —— merge + retry 一次 (mergeRemoteAndRetry 内部成功也会更新 lastPushedPositions / lastSyncedAt)
@@ -258,7 +285,7 @@ async function mergeRemoteAndRetry(localSnapshot) {
   // - docs[*].position: 本地有就用本地 (本设备活跃,远端 stale)
   //   实际上 setPosition 只针对正在读的 doc,所以这等价于"活跃 doc 的 position 用本地"
   // - 其它字段 (addedAt) remote 优先(可能远端刚 ingest 了)
-  const merged = structuredClone(remoteState);
+  const merged = JSON.parse(JSON.stringify(remoteState));
   if (localSnapshot.lastActive) merged.lastActive = localSnapshot.lastActive;
   for (const [id, d] of Object.entries(localSnapshot.docs)) {
     if (!merged.docs[id]) merged.docs[id] = {};

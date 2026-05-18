@@ -121,38 +121,70 @@ export function getSpreadMode() {
   return viewer?.spreadMode ?? 0;
 }
 
-// 概览模式开 / 关。打开时主 viewer 隐藏,缩略图占满 surface;关闭反之。
-// 不 destroy 任何 viewer instance,只切换可见性 + 渲染优先级。
+// 概览模式:pdfjs-dist v4 没暴露 PDFThumbnailViewer,先 stub,
+// 等改方案(自己 roll grid 或换实现)再启用。
 let overviewOn = false;
-export function setOverviewVisible(visible) {
-  if (!thumbViewer || !thumbContainer || !container) return;
-  if (visible === overviewOn) return;
-  overviewOn = !!visible;
-  if (overviewOn) {
-    // 让 thumb viewer 跟主 viewer 当前页对齐,打开就看见自己在哪
-    const cur = viewer.currentPageNumber || 1;
-    thumbContainer.classList.remove("hidden");
-    container.classList.add("hidden");
-    renderingQueue.isThumbnailViewEnabled = true;
-    // 滚到当前页,延一帧等 layout
-    requestAnimationFrame(() => {
-      try { thumbViewer.scrollThumbnailIntoView(cur); } catch (_) {}
-    });
-  } else {
-    thumbContainer.classList.add("hidden");
-    container.classList.remove("hidden");
-    renderingQueue.isThumbnailViewEnabled = false;
-  }
+export function setOverviewVisible(_visible) {
+  // no-op,概览功能暂时不可用
 }
-
 export function isOverviewVisible() {
   return overviewOn;
+}
+export function canOverview() {
+  return false;
 }
 
 // 程序化跳到某一页 (1-based)。从缩略图点击进来,会先用这个跳主 viewer
 export function goToPage(pageNumber) {
   if (!viewer) return;
   viewer.currentPageNumber = pageNumber;
+}
+
+// 提取当前 reading-line 那一页的文本(从 pdf.js 已经渲染的 text layer 拿)。
+// LaTeX 公式: PDF 本身只存定位的 glyph,没源,所以你得到 "α+β" 这种,不是 \alpha+\beta。
+// 想要真 LaTeX 要 .tex 源或 math OCR (MathPix),浏览器侧做不到。
+export async function extractCurrentPageText() {
+  if (!viewer || !currentPdf) return null;
+  const pos = currentPosition();
+  if (!pos) return null;
+  // 优先用 pdf.js 的 getTextContent (更结构化,自己拼 reading order),
+  // 拿不到再 fallback 到 text layer DOM 的 textContent。
+  try {
+    const page = await currentPdf.getPage(pos.pageIndex + 1);
+    const tc = await page.getTextContent();
+    // tc.items[i] = { str, hasEOL, transform, width, height, dir, fontName }
+    // 简单拼接:有 EOL 就换行,否则空格隔开
+    const out = [];
+    for (const it of tc.items) {
+      out.push(it.str);
+      if (it.hasEOL) out.push("\n");
+    }
+    return out.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  } catch (e) {
+    // fallback
+    const pv = viewer.getPageView(pos.pageIndex);
+    const tl = pv?.textLayer?.div || pv?.div?.querySelector(".textLayer");
+    return tl ? (tl.textContent || tl.innerText || "").trim() : null;
+  }
+}
+
+// 把当前 reading-line 落在的那一页的 canvas 截图为 PNG Blob,
+// 调用方写到剪贴板(给 AI 喂图问问题用)。
+export async function snapshotCurrentPage() {
+  if (!viewer || !currentPdf) return null;
+  const pos = currentPosition();
+  if (!pos) return null;
+  const pv = viewer.getPageView(pos.pageIndex);
+  if (!pv?.div) return null;
+  // pageView.canvas 是 pdf.js 直接公开的;有些版本只在 div 里找
+  const canvas = pv.canvas || pv.div.querySelector("canvas");
+  if (!canvas) return null;
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("canvas.toBlob 返回空"));
+    }, "image/png");
+  });
 }
 
 function setupMousePan(c) {
@@ -246,28 +278,16 @@ export async function initViewer({ containerEl, thumbContainerEl, onPosition, on
 
   eventBus = new pdfViewerNs.EventBus();
   linkService = new pdfViewerNs.PDFLinkService({ eventBus });
-  // 渲染队列:让 main viewer 跟 thumbnail viewer 共享一个调度器,根据"哪个在前"决定优先级
-  renderingQueue = new pdfViewerNs.PDFRenderingQueue();
+  // pdfjs-dist v4.x 的 pdf_viewer.mjs 只 export {EventBus, PDFLinkService, PDFViewer}。
+  // PDFRenderingQueue / PDFThumbnailViewer 不在 public exports 里 → 不能用。
+  // 主 viewer 不带 renderingQueue 也能跑(pdf.js 内部会用一个默认的)。
+  // 缩略图概览功能暂时禁用,等用别的方案实现。
   viewer = new pdfViewerNs.PDFViewer({
     container,
     eventBus,
     linkService,
-    renderingQueue,
   });
-  renderingQueue.setViewer(viewer);
   linkService.setViewer(viewer);
-
-  if (thumbContainer) {
-    thumbViewer = new pdfViewerNs.PDFThumbnailViewer({
-      container: thumbContainer,
-      eventBus,
-      linkService,
-      renderingQueue,
-    });
-    renderingQueue.setThumbnailViewer(thumbViewer);
-    // 默认主 viewer 在前
-    renderingQueue.isThumbnailViewEnabled = false;
-  }
 
   eventBus.on("pagesinit", () => {
     // 应用上次的 spread mode (device-local,跨论文共享)
@@ -385,7 +405,6 @@ export async function loadPdf({ docId, data, position }) {
   currentPdf = await loadingTask.promise;
   viewer.setDocument(currentPdf);
   linkService.setDocument(currentPdf);
-  if (thumbViewer) thumbViewer.setDocument(currentPdf);
   return currentPdf;
 }
 
@@ -470,7 +489,6 @@ export function teardownCurrent() {
     currentPdf = null;
   }
   if (viewer) viewer.setDocument(null);
-  if (thumbViewer) thumbViewer.setDocument(null);
   currentDocId = null;
   pendingRestore = null;
 }
