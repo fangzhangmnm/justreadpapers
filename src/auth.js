@@ -1,16 +1,13 @@
 // Microsoft Entra (Azure AD) 登录 via MSAL.js.
 //
-// MSAL 从 CDN 懒加载,SW 不要缓存跨源 (alcdn.msftauth.net / graph / login)。
+// MSAL vendor 在 src/vendor/msal/msal-browser.min.js (见 src/vendor/README.md)。
 // 缓存账号 + silent token 探测 = 同一 origin 下其它 app 已登录但本 app 没授权时,
 // 不假装 "已登录" —— 把按钮挂出来让用户 explicit consent。
 
 import { CLIENT_ID, AUTHORITY, SCOPES } from "./config.js";
 
 const MSAL_VERSION = "3.27.0";
-const MSAL_URLS = [
-  `https://cdn.jsdelivr.net/npm/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-  `https://unpkg.com/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-];
+const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", import.meta.url).href;
 
 let msalLoadPromise = null;
 let pca = null;
@@ -32,18 +29,14 @@ function loadMsal() {
   if (window.msal) return Promise.resolve(window.msal);
   if (msalLoadPromise) return msalLoadPromise;
   msalLoadPromise = (async () => {
-    let lastErr = null;
-    for (const url of MSAL_URLS) {
-      try {
-        await loadScript(url);
-        if (window.msal) return window.msal;
-        lastErr = new Error("MSAL 加载完但 window.msal 没出现");
-      } catch (e) {
-        lastErr = e;
-      }
+    try {
+      await loadScript(MSAL_URL);
+      if (window.msal) return window.msal;
+      throw new Error("MSAL 加载完但 window.msal 没出现");
+    } catch (e) {
+      msalLoadPromise = null;
+      throw new Error(`MSAL 加载失败: ${e?.message ?? "unknown"}`);
     }
-    msalLoadPromise = null;
-    throw new Error(`MSAL 加载失败: ${lastErr?.message ?? "unknown"}`);
   })();
   return msalLoadPromise;
 }

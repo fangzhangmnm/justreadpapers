@@ -10,10 +10,10 @@
 
 import { READING_LINE_ANCHOR } from "./config.js";
 
+// pdf.js vendor 在 src/vendor/pdfjs/(见 src/vendor/README.md)。
+// 用 import.meta.url 算绝对 URL,部署在 /justreadpapers/ 子路径下也对。
 const PDFJS_VERSION = "4.10.38";
-const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}`;
-// fallback CDN
-const PDFJS_BASE_FB = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}`;
+const PDFJS_BASE = new URL("./vendor/pdfjs/", import.meta.url).href;
 
 // per-doc + per-spread-mode 的缩放偏好,**存的是相对 cozy 的倍率**(factor),不是绝对 scale。
 // 这样换窗口尺寸 / 横竖屏 / 设备,"我喜欢比 fit 大 X%" 永远成立。
@@ -397,26 +397,13 @@ function setupMousePan(c) {
   c.addEventListener("pointercancel", release);
 }
 
-async function loadModule(rel) {
-  const urls = [`${PDFJS_BASE}/${rel}`, `${PDFJS_BASE_FB}/${rel}`];
-  let last = null;
-  for (const u of urls) {
-    try {
-      return await import(/* @vite-ignore */ u);
-    } catch (e) {
-      last = e;
-    }
-  }
-  throw new Error(`pdf.js 加载失败 (${rel}): ${last?.message ?? "?"}`);
-}
-
 async function ensureLib() {
   if (pdfjsLib && pdfViewerNs) return;
   [pdfjsLib, pdfViewerNs] = await Promise.all([
-    loadModule("build/pdf.mjs"),
-    loadModule("web/pdf_viewer.mjs"),
+    import(/* @vite-ignore */ `${PDFJS_BASE}pdf.mjs`),
+    import(/* @vite-ignore */ `${PDFJS_BASE}web/pdf_viewer.mjs`),
   ]);
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}/build/pdf.worker.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}pdf.worker.mjs`;
 }
 
 export async function initViewer({ containerEl, thumbContainerEl, onPosition, onPagePeek: opp }) {
@@ -569,9 +556,9 @@ export async function loadPdf({ docId, data, position }) {
   const loadingTask = pdfjsLib.getDocument({
     data: docData,
     // 字体子集/标准字体目录
-    cMapUrl: `${PDFJS_BASE}/cmaps/`,
+    cMapUrl: `${PDFJS_BASE}cmaps/`,
     cMapPacked: true,
-    standardFontDataUrl: `${PDFJS_BASE}/standard_fonts/`,
+    standardFontDataUrl: `${PDFJS_BASE}standard_fonts/`,
   });
   currentPdf = await loadingTask.promise;
   viewer.setDocument(currentPdf);

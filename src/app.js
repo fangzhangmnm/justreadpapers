@@ -728,9 +728,10 @@ async function deriveFileName(file) {
   let title = "";
   try {
     const buf = await file.arrayBuffer();
-    const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+    // vendor 在 src/vendor/pdfjs/ (跟 viewer.js 共享同一份)
+    const pdfjsBase = new URL("./vendor/pdfjs/", import.meta.url).href;
+    const pdfjs = await import(/* @vite-ignore */ `${pdfjsBase}pdf.mjs`);
+    pdfjs.GlobalWorkerOptions.workerSrc = `${pdfjsBase}pdf.worker.mjs`;
     const doc = await pdfjs.getDocument({ data: buf }).promise;
     const meta = await doc.getMetadata();
     title = cleanPdfTitle(meta?.info?.Title || "");
