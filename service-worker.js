@@ -8,7 +8,7 @@
 //
 // 改了 precache 文件后 bump CACHE_VERSION。
 
-const CACHE_VERSION = "v19-2026-05-26";
+const CACHE_VERSION = "v20-2026-05-26";
 const CACHE_NAME = `jrp-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

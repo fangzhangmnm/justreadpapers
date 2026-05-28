@@ -399,10 +399,11 @@ function setupMousePan(c) {
 
 async function ensureLib() {
   if (pdfjsLib && pdfViewerNs) return;
-  [pdfjsLib, pdfViewerNs] = await Promise.all([
-    import(/* @vite-ignore */ `${PDFJS_BASE}pdf.mjs`),
-    import(/* @vite-ignore */ `${PDFJS_BASE}web/pdf_viewer.mjs`),
-  ]);
+  // 必须串行:pdf.mjs 的副作用 (`globalThis.pdfjsLib = {...}`) 必须在
+  // pdf_viewer.mjs 被 evaluate 前完成,否则 pdf_viewer.mjs 顶层
+  // `} = globalThis.pdfjsLib;` destructure undefined,抛 "Cannot destructure property 'AbortException'..."
+  pdfjsLib = await import(/* @vite-ignore */ `${PDFJS_BASE}pdf.mjs`);
+  pdfViewerNs = await import(/* @vite-ignore */ `${PDFJS_BASE}web/pdf_viewer.mjs`);
   pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}pdf.worker.mjs`;
 }
 
