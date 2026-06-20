@@ -1,0 +1,6 @@
+// 测试入口:node test/run.mjs(node 24 strip-types 直跑导入的 .ts)。
+// 加新测试文件:在下面 import 一行即可。
+import "./valuable-save.test.ts";
+import { run } from "./_harness.ts";
+
+await run();

@@ -27,5 +27,15 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["ARCHIVE", "src/vendor", "node_modules", ".claude"]
+  // baked store 里 JRP v1 用不到、且依赖 WebPaint 专属 .js 的文件:从类型门排除(文件保留不动,
+  // 不破坏 FORK-BASE reconcile)。persistence.ts 只窄 import 具体文件(cloud-sync/folder-store/
+  // providers),绝不 import store/index.ts(它 re-export createStore→拖进这些)。
+  // 若 JRP 日后要加密(crypto-container) / 本地缓存适配器(local-adapter),补齐其缺失依赖再移出此列。
+  "exclude": [
+    "ARCHIVE", "src/vendor", "node_modules", ".claude",
+    "src/store/store.ts",
+    "src/store/index.ts",
+    "src/store/crypto-container.ts",
+    "src/store/local-adapter.ts"
+  ]
 }
