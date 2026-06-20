@@ -15,7 +15,8 @@
 
 - **纯 TS greenfield，旧 JRP 代码一律不抄**（`ARCHIVE/*.js` 只当算法/UX spec 读，重新写 TS）。`src/store/` 是 WebPaint bake 的共享依赖（FORK-BASE 戳），不算抄旧 IP。
 - **store 是唯一持久化接缝**：app 不直接碰 OneDrive/localStorage/IndexedDB。
-- UI 全中文、无 system dialog、SVG icon、vendor 一切（pdf.js/MSAL 复用）。
+- **UI = Vue**（vendor `vue.esm-browser.prod` + template 字符串 + esbuild，对齐 WebPaint pilot；user 2026-06-20 定）。domain/persistence **framework-free**（valuable-save 等纯模块不受影响）；pdf.js viewer 当 **imperative island**（Vue 组件里 mount，pdf.js 自管 canvas/DOM）。
+- UI 全中文、无 system dialog、SVG icon、vendor 一切（pdf.js/MSAL/**Vue** 复用）。
 - Quest 一等公民（截图当前页→剪贴板、滚动条宽度、DPI/safe-area）。纯 URL 访问(不装 PWA)必须完整可用。
 - UI 可抄兄弟 `../webxiaoheiwu`、`../background radio`（user 批准，思路策略一样）——文件面板/idle-conflict toast/暖主题。
 
@@ -65,6 +66,12 @@ shell ▼
    index.html  styles.css
 ```
 
+### 2b. UI 架构 = greenfield Vue（**不抄 WebPaint 的 brownfield 岛**）
+WebPaint 的 Vue 是 brownfield：Vue 岛 `mountXxx(el,{getX,onY})` 用 ref 桥进命令式 app.js——retrofit 妥协，**不抄其结构**。只复用机械工具链（vendored `vue.esm-browser.prod` 3.5.35 + template 字符串 + esbuild）。JRP **Vue 一路到底**：
+- **reactive 应用 store**（`src/app-state.ts`：Vue `reactive()` + composable + provide/inject）= UI 单一反应式真相源,包住 persistence(catalog/content/settings)+domain(当前 doc/viewer/同步态)。组件**直接消费,无命令式 app 桥**。
+- 组件树：`App` → `Viewer`(pdf.js imperative island,onMounted 驱动 PDFViewer,watch 当前 doc 重载,scroll→store.setPosition) / `TopBar` / `LibraryPanel`→`FolderTree` / `OutlineDrawer` / `ThumbnailOverview` / `StatusLine` / `Toasts`(更新/冲突/idle) / `ReadingControls`(zoom/spread/theme via settings)。
+- **reactivity 纪律(WebPaint 踩出来的 Vue 事实,干净地一开始就守)**：leaf 过边界传**值快照**不传活引用(props 相等闸 + computed 依赖闸会断信号)；cross-cutting state 走 reactive-SSoT,窄值 seam 走 leaf-by-value；**pdf.js 页 canvas / in-flight 渲染 / pdf.js 内部状态绝不进 reactive 图**。
+
 ## 3. 三个持久化面（把红线钉死在 persistence.ts 一处）
 
 `src/persistence.ts` 是**唯一** import `src/store/*`、构造 provider/folderStore/settings 的文件，一处注入 MSAL config + localStorage 包装的 kv（store 内部用）。grep `src/`（除 persistence + store）出现 `localStorage|indexedDB|graph|msal` = 违规。
@@ -89,13 +96,15 @@ shell ▼
 
 > 已定：**identity = docId（内容 hash | arxivId）**（user 2026-06-20 确认）——catalog 按它键，存 docId→fileName。**folder 现名** v1 直接用，改名走 backlog item 1。**PDF 缓存** (#1) 延后到 P3 再定（不挡 P1，content.read 先直 pull）。
 
-## 5. 阶段（spec 的 build-order：风险前置、每阶段独立可测）
+## 5. 阶段（resequenced 2026-06-20：dev/prod + PWA shell 提前,好让 user 监管 /dev/）
 
 - **P0 工具链** ✅（package.json/tsconfig/build.sh/.gitignore；store baked；旧 code 进 ARCHIVE）。
-- **P1 持久化 + 域 + resume**：`persistence.ts`(3 面) + `domain/{doc-id,valuable-save,viewer-geometry}` + `resume.ts`，配 node 单测。**先打通 spec build-order #1+#2**（auth+graph+approot 经 store；viewer core + `{pageIndex,yFraction}` 恢复 + resume-on-open）——**到这步 Quest 场景已成立**。store 红线改动若需→escalate。
-- **P2 UI**：viewer(主表面) → library-panel → folder-tree → thumbnails/reading-controls/quest/status。抄 webxiaoheiwu 的面板/conflict/主题。
-- **P3 ingest + shell**：本地上传 + auto-rename → service-worker(app-shell+更新检测+PDF Cache) → index.html/styles.css。arxiv+proxy 按 spec 待定 #1 缓。
-- 每阶段 node 测过 + 桌面跑过再真机。push prod 前问人。
+- **P1 域模块（进行中）**：`domain/valuable-save` ✅（7 测过，逮哨兵 bug）。接着 `domain/{doc-id,viewer-geometry}`，纯模块配 node 单测。
+- **P1.5 部署骨架（提前 = 解锁监管）**：vendor Vue → 最小 Vue app 骨架（main.ts mount）→ **PWA shell**（service-worker 重写：app-shell cache-first + 4 路更新检测 + 离线 + manifest）→ **dev/prod 分离**（GH Actions `main→/dev/`，prod 另开）。产出**可部署 `/dev/`**。此后 merge WIP 回 main 只动 `/dev/`、**prod 不动** → user 实时监管。PWA shell + deploy 写成可抽取 = 家族 **sw-kit** 候选 artifact。
+- **P2 持久化 + resume**：`persistence.ts`（catalog/content/settings 三面，装配 store）+ `resume.ts`（启动编排：token→catalog→render lastActive@position→bytes）。打通 spec build-order #1+#2 → Quest 场景成立。store 红线改动若需→escalate。
+- **P3 UI（Vue）**：viewer（imperative island，主表面）→ library-panel → folder-tree → thumbnails/reading-controls/quest/status。抄 webxiaoheiwu 面板/conflict/暖主题 + FEATURES.md parity。
+- **P4 ingest**：本地上传 + auto-rename（修双页 bug、接死按钮也在这批）。下载（URL）留到重构跑通后。
+- 每阶段 node 测过 + `/dev/` 部署看过。**promote prod 前问人。**
 
 ## 6. 排期外 / parked
 
