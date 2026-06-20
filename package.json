@@ -1,0 +1,14 @@
+{
+  "name": "justreadpapers",
+  "private": true,
+  "type": "module",
+  "comment": "运行时无依赖、全 vendor（src/ 全 TS ESM，构建走 scripts/build.sh + tools/esbuild；node 直跑 test/）。devDependencies 仅供 tsc --noEmit 类型门，不进运行时 bundle、不影响部署。家族第一个纯 TS sibling，工具链抄 WebPaint。",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}

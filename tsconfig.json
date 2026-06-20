@@ -1,0 +1,31 @@
+{
+  // 类型检查专用（tsc --noEmit）——不产出文件；运行时由 esbuild strip-types + bundle。
+  // JRP 是家族第一个纯 TS sibling：整个 src/**/*.ts 一开始就全纳管（不走 WebPaint 那种增量白名单）。
+  // import 写 .ts 扩展名（见 WebPaint 约定）。ARCHIVE/ 是旧 JS 屎山,只读 spec,不检。
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+
+    // esbuild/node strip-types 跑 .ts；module:preserve + bundler 解析 + allowImportingTsExtensions
+    // 才能让 tsc 认 "./x.ts" 这种 specifier。
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+
+    // vendor 里的 pdf.js / msal 是未类型化 .js：allowJs 让它们能被解析,checkJs:false 让它们不报错。
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+
+    // verbatimModuleSyntax：强制 type-only import 写 `import type`,否则 strip-types 会把纯类型 import
+    // 当运行时 import 留下 → 运行时「does not provide an export」。node/esbuild 兼容的硬约束。
+    "verbatimModuleSyntax": true,
+
+    "types": [],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["ARCHIVE", "src/vendor", "node_modules", ".claude"]
+}
