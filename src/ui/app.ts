@@ -1,12 +1,12 @@
 // 根组件 = shell 编排:左上文件 sidebar(gallery)+目录,右上 ☰ 系统菜单(3c),中间 viewer。
 // 打开论文:read 云字节 → docId(内容 hash)→ catalog upsert/touch → viewer.loadBlob + 复位位置。
 // boot:initAuth → jumpscare(自动开 lastActive,产品心脏)。scroll → recordPosition(节流落盘)。
-import { defineComponent, ref, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
+import { defineComponent, ref, computed, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell } from "../app-state.ts";
 import { PAPERS_FOLDER } from "../config.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
@@ -25,6 +25,20 @@ export const App = defineComponent({
     const spread = ref(0);
     const toast = ref("");
     let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // ── ☰ 系统菜单 + 主题 ──
+    const menuOpen = ref(false);
+    const themeMode = ref(settings().get("theme") || "auto");   // auto | day | night
+    function resolveTheme(m: string): string {
+      return m === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day") : m;
+    }
+    function applyTheme(): void { document.documentElement.dataset.theme = resolveTheme(themeMode.value); }
+    function cycleTheme(): void {
+      themeMode.value = themeMode.value === "auto" ? "day" : themeMode.value === "day" ? "night" : "auto";
+      settings().set("theme", themeMode.value); applyTheme();
+    }
+    const themeLabel = computed(() => themeMode.value === "auto" ? "跟随系统" : themeMode.value === "day" ? "日间" : "夜间");
+    function forceUpdate(): void { menuOpen.value = false; void pwaShell().reload(); }
 
     function showToast(msg: string): void {
       toast.value = msg;
@@ -69,6 +83,7 @@ export const App = defineComponent({
     }
 
     onMounted(async () => {
+      applyTheme();
       const auth = persistence().auth;
       let resumed = false;
       // 登录真 resolve(含刷新后的后台 silent 探测,经 onAuthChanged)→ catalog.init + jumpscare(一次性)。
@@ -91,6 +106,8 @@ export const App = defineComponent({
 
     return {
       viewerRef, galleryOpen, currentDocId, title, pos, page, total, spread, toast,
+      menuOpen, themeLabel, appUi, cycleTheme, forceUpdate,
+      toggleMenu: (): void => { menuOpen.value = !menuOpen.value; },
       onGalleryOpen, onLocalFile,
       onPos: (p: Position): void => { pos.value = p; if (currentDocId.value) persistence().recordPosition(currentDocId.value, p); },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
@@ -122,7 +139,7 @@ export const App = defineComponent({
         </div>
         <span class="jrp-fname">{{ title || '☰ 打开论文库选一篇' }}</span>
         <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}<template v-if="pos"> · {{ Math.round(pos.yFraction * 100) }}%</template></span>
-        <button class="jrp-icon" title="系统菜单(主题/更新/缓存,稍后)" aria-label="系统菜单">
+        <button class="jrp-icon" @click="toggleMenu" title="系统菜单" aria-label="系统菜单">
           <svg viewBox="0 0 20 20" width="18" height="18"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 6h12M4 10h12M4 14h12"/></svg>
         </button>
       </header>
@@ -131,6 +148,13 @@ export const App = defineComponent({
         <div class="jrp-backdrop" v-if="galleryOpen" @click="galleryOpen = false"></div>
         <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" @toast="onToast" /></div>
       </div>
+      <div class="jrp-menu-backdrop" v-if="menuOpen" @click="menuOpen = false"></div>
+      <div class="jrp-menu" v-if="menuOpen">
+        <button class="jrp-menu-item" @click="cycleTheme">颜色模式 · {{ themeLabel }}</button>
+        <button class="jrp-menu-item" @click="forceUpdate">强制更新</button>
+        <button class="jrp-menu-item" disabled>离线缓存 · 待接</button>
+      </div>
+      <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="toast">{{ toast }}</div>
     </div>
   `,
