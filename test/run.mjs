@@ -3,6 +3,7 @@
 import "./valuable-save.test.ts";
 import "./doc-id.test.ts";
 import "./viewer-geometry.test.ts";
+import "./catalog.test.ts";
 import { run } from "./_harness.ts";
 
 await run();
