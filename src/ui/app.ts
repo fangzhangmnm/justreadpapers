@@ -1,20 +1,28 @@
-// 根组件。P3:topbar(打开本地 PDF + zoom/spread/截图/复制 + 页码)+ Viewer(主表面)+ toast。
-// 后续:resume 编排、library panel、folder-tree、云选项 挂这里。
-import { defineComponent, ref } from "../vendor/vue/vue.esm-browser.prod.js";
+// 根组件 = shell 编排:左上文件 sidebar(gallery)+目录,右上 ☰ 系统菜单(3c),中间 viewer。
+// 打开论文:read 云字节 → docId(内容 hash)→ catalog upsert/touch → viewer.loadBlob + 复位位置。
+// boot:initAuth → jumpscare(自动开 lastActive,产品心脏)。scroll → recordPosition(节流落盘)。
+import { defineComponent, ref, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { Viewer } from "./viewer.ts";
+import { Gallery } from "./gallery.ts";
+import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
+import { persistence } from "../app-state.ts";
+import { PAPERS_FOLDER } from "../config.ts";
+import type { GalleryItem } from "../gallery-model.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const App = defineComponent({
   name: "JrpApp",
-  components: { Viewer },
+  components: { Viewer, Gallery },
   setup() {
     const viewerRef = ref<any>(null);
+    const galleryOpen = ref(false);
+    const currentDocId = ref<string | null>(null);
+    const title = ref("");
     const pos = ref<Position | null>(null);
-    const fileName = ref("");
     const page = ref(0);
     const total = ref(0);
-    const spread = ref(0);            // 0 单页 / 1 双页
+    const spread = ref(0);
     const toast = ref("");
     let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,22 +31,56 @@ export const App = defineComponent({
       if (toastTimer) clearTimeout(toastTimer);
       toastTimer = setTimeout(() => { toast.value = ""; }, 2200);
     }
-    async function onFile(e: Event): Promise<void> {
-      const input = e.target as HTMLInputElement;
-      const f = input.files && input.files[0];
-      if (!f) return;
-      fileName.value = f.name; pos.value = null;
-      await viewerRef.value?.loadBlob(f, { key: f.name, pos: null });
-    }
     const v = (): any => viewerRef.value;
 
+    // 打开一篇云端论文(gallery 或 jumpscare 都走这):read → docId → catalog → viewer + 复位。
+    async function openPaper(item: { path: string; name: string; title: string }): Promise<void> {
+      galleryOpen.value = false;
+      let blob: Blob | null = null;
+      try { blob = await persistence().content.read(item.path); } catch { /* */ }
+      if (!blob) { showToast("读取失败(未登录/离线?)"); return; }
+      const docId = await contentDocId(await blob.arrayBuffer());
+      const cat = persistence().catalog;
+      if (!cat.get(docId)) cat.upsert(docId, { fileName: item.name, addedAt: nowMs() });
+      else cat.upsert(docId, { fileName: item.name });   // 保 fileName 跟当前(扛改名)
+      cat.touch(docId);
+      currentDocId.value = docId; title.value = item.title; pos.value = null;
+      const restore = cat.get(docId)?.position ?? null;
+      await v()?.loadBlob(blob, { key: docId, pos: restore });
+    }
+    function onGalleryOpen(it: GalleryItem): void { void openPaper({ path: it.path, name: it.name, title: it.title }); }
+
+    // 本地 PDF(测试 / 登录失败 fallback):不进 catalog,viewer 直加载。
+    async function onLocalFile(e: Event): Promise<void> {
+      const input = e.target as HTMLInputElement;
+      const f = input.files && input.files[0]; if (!f) return;
+      currentDocId.value = null; title.value = f.name; pos.value = null; galleryOpen.value = false;
+      await v()?.loadBlob(f, { key: f.name, pos: null });
+    }
+
+    // jumpscare:启动直开 lastActive 那篇那页(产品心脏:1-click resume,无 library 落地屏)。
+    function jumpscare(): void {
+      const cat = persistence().catalog;
+      const id = cat.lastActiveId(); if (!id) { galleryOpen.value = true; return; }
+      const doc = cat.get(id); if (!doc || !doc.fileName) { galleryOpen.value = true; return; }
+      void openPaper({ path: `${PAPERS_FOLDER}/${doc.fileName}`, name: doc.fileName, title: doc.title || doc.fileName });
+    }
+
+    onMounted(async () => {
+      try {
+        const { signedIn } = await persistence().boot();
+        if (signedIn) jumpscare(); else galleryOpen.value = true;   // 没登录 → 开 gallery 让登录
+      } catch { galleryOpen.value = true; }
+    });
+
     return {
-      viewerRef, pos, fileName, page, total, spread, toast,
-      onFile,
-      onPos: (p: Position): void => { pos.value = p; },
+      viewerRef, galleryOpen, currentDocId, title, pos, page, total, spread, toast,
+      onGalleryOpen, onLocalFile,
+      onPos: (p: Position): void => { pos.value = p; if (currentDocId.value) persistence().recordPosition(currentDocId.value, p); },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
       onSpread: (m: number): void => { spread.value = m; },
       onToast: showToast,
+      toggleGallery: (): void => { galleryOpen.value = !galleryOpen.value; },
       zoomIn: (): void => v()?.zoomIn(),
       zoomOut: (): void => v()?.zoomOut(),
       fitWidth: (): void => v()?.fitWidth(),
@@ -50,20 +92,32 @@ export const App = defineComponent({
   template: `
     <div class="jrp-shell">
       <header class="jrp-topbar">
-        <label class="jrp-btn">打开<input type="file" accept="application/pdf" @change="onFile" hidden></label>
-        <div class="jrp-controls" v-if="fileName">
+        <button class="jrp-icon" @click="toggleGallery" title="论文库" aria-label="论文库">
+          <svg viewBox="0 0 20 20" width="18" height="18"><path fill="currentColor" d="M2 5a1 1 0 0 1 1-1h5l1.5 1.5H17a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+        </button>
+        <label class="jrp-btn" title="打开本地 PDF(测试/fallback)">本地<input type="file" accept="application/pdf" @change="onLocalFile" hidden></label>
+        <div class="jrp-controls" v-if="total">
           <button class="jrp-btn" @click="zoomOut" title="缩小">−</button>
           <button class="jrp-btn" @click="fitWidth" title="适配宽度">适配</button>
           <button class="jrp-btn" @click="zoomIn" title="放大">＋</button>
           <button class="jrp-btn" @click="toggleSpread">{{ spread ? '单页' : '双页' }}</button>
-          <button class="jrp-btn" @click="screenshot" title="截当前页到剪贴板,粘给 AI 问">截图</button>
-          <button class="jrp-btn" @click="copyText" title="复制当前页文本(公式出 glyph)">复制</button>
+          <button class="jrp-btn" @click="screenshot" title="截当前页到剪贴板">截图</button>
+          <button class="jrp-btn" @click="copyText" title="复制当前页文本">复制</button>
         </div>
-        <span class="jrp-fname">{{ fileName || '选一份本地 PDF 试 viewer' }}</span>
+        <span class="jrp-fname">{{ title || '☰ 打开论文库选一篇' }}</span>
         <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}<template v-if="pos"> · {{ Math.round(pos.yFraction * 100) }}%</template></span>
+        <button class="jrp-icon" title="系统菜单(主题/更新/缓存,稍后)" aria-label="系统菜单">
+          <svg viewBox="0 0 20 20" width="18" height="18"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 6h12M4 10h12M4 14h12"/></svg>
+        </button>
       </header>
-      <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" @toast="onToast" /></div>
+      <div class="jrp-body">
+        <Gallery v-if="galleryOpen" @open="onGalleryOpen" @close="galleryOpen = false" />
+        <div class="jrp-backdrop" v-if="galleryOpen" @click="galleryOpen = false"></div>
+        <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" @toast="onToast" /></div>
+      </div>
       <div class="jrp-toast" v-if="toast">{{ toast }}</div>
     </div>
   `,
 });
+
+function nowMs(): number { return Date.now(); }
