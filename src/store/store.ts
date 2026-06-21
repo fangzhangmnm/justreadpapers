@@ -49,6 +49,12 @@ interface StoreDeps {
     makePeek?: (data: Blob) => Promise<Uint8Array | null>;     // 明文 → 明文不透明字节；加密深模块做
     getPassword?: (name: string) => string | null;            // 同步、非交互、只读内存（唯一密码来源）
   };
+  /** N2（审计 2026-06-09，贴 MASTER 第5行）：采纳云端字节（clean fast-forward / pull）落盘**前**的有效性校验 hook。
+   *  store **格式盲**——校验逻辑由 app 提供（WebPaint：是 ora-zip 或加密容器）。返回 false →
+   *  绝不覆盖本地、不推进 etag/dirty，flow 报 reason="invalid-cloud-bytes"。挡 captive-portal 的
+   *  200-HTML body / 坏云副本覆盖唯一一份好本地副本（clean FF ⇒ 无 backup）。
+   *  缺省（canonical / 非 WebPaint）= 不校验，行为完全不变（与 folder-flow 的 parseFolderBlob 护甲同位）。 */
+  validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
 }
 
 // 冲突 / 同步流的状态机返回（status 判别）。app 据此续 UI。
@@ -69,6 +75,7 @@ interface FlowResult {
   backedUp?: string | null;
   cloudDeferred?: boolean;
   queuedCloudDelete?: boolean;
+  oldCloudOrphan?: boolean;   // N7：rename 后旧云文件 .trash 失败 → 残留孤儿，caller 应 surface
   trashKey?: string | null;
   trashed?: unknown;
   push?: unknown;
@@ -114,7 +121,7 @@ interface FlowResult {
  *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
  *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {} }: StoreDeps = {} as StoreDeps) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {}, validateAdopt }: StoreDeps = {} as StoreDeps) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -140,9 +147,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   function hasParent(name: string) { return _parent.has(name); }
   function parentFor(name: string): string | null { return _parent.has(name) ? _parent.get(name)! : null; }
 
-  function _retriable(e: any): boolean {
-    return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
-      && e.name !== "CloudConflictError" && e.name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
+  function _retriable(e: unknown): boolean {
+    return !!e && ((e as { status?: number }).status == null || (e as { status?: number }).status === 429 || ((e as { status?: number }).status! >= 500 && (e as { status?: number }).status! <= 599))
+      && (e as { name?: string }).name !== "CloudConflictError" && (e as { name?: string }).name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
   }
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
@@ -201,8 +208,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
           const { item } = await cloud.push(name, bytes, { baseEtag, encrypted: isEnc });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
-        } catch (e: any) {
-          if (e && e.name === "CloudConflictError") {
+        } catch (e: unknown) {
+          if (e && (e as { name?: string }).name === "CloudConflictError") {
             if (await _tryHeal(name, bytes)) return _finish(name, v0, getEditVersion, "healed");
             const choice = onConflict ? await onConflict({ name }) : "keep";
             return await _resolveConflict(name, choice, { bytes, adopt, saveBranch, now });   // pull/branch/weak-override 在 Store 内执行
@@ -230,22 +237,33 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 仅在 local 注入时调用（caller 保证）；故内部用 local! 断言非空。
   async function _safePull(name: string, adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>): Promise<SafePullResult> {
     let backupName: string | undefined;
-    // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
-    //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
-    if (cloud.isDirty(name) || sub.edits.localDirty()) {
-      try { backupName = await local!.backup(name); }
-      catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+    // N10：换内容临界段——置 replacing。input 起笔门读 store.busy.replacing() 降级（FF-wins：挡笔不中止）。
+    //   覆盖**整段**（含 cloud.pull 网络窗）：起笔落在旧内容上随后被 adopt 覆盖 = 可见丢笔，挡笔静默 > 丢笔可见。
+    //   gate 归 store 拥（SSoT），auto-FF 路径（app 传 busy:undefined）也被护住，不再裸奔。finally 必清。
+    busy.set("replacing", true);
+    try {
+      // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
+      //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
+      if (cloud.isDirty(name) || sub.edits.localDirty()) {
+        try { backupName = await local!.backup(name); }
+        catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+      }
+      const r = await cloud.pull(name);
+      if (!r) return { ok: false, reason: "cloud-vanished", backupName };
+      // N2：采纳云端字节落盘前校验是真容器（app 注入；store 格式盲）。坏字节（captive-portal 200-HTML /
+      //   损坏云副本）→ 拒绝，绝不用它覆盖唯一一份好本地（clean FF 没 backup）。备份已留则原件仍在。
+      if (validateAdopt && !(await validateAdopt(r.blob))) return { ok: false, reason: "invalid-cloud-bytes", backupName };
+      await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
+      // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
+      //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。
+      if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
+      cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
+      clearParent(name);                        // episode 结束（已采纳云版）
+      if (adopt) await adopt(await _unsealOrThrow(name, r.blob), name);   // 反映到活编辑器（已解壳为明文）
+      return { ok: true, backupName };
+    } finally {
+      busy.set("replacing", false);
     }
-    const r = await cloud.pull(name);
-    if (!r) return { ok: false, reason: "cloud-vanished", backupName };
-    await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
-    // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
-    //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。
-    if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
-    cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
-    clearParent(name);                        // episode 结束（已采纳云版）
-    if (adopt) await adopt(await _unsealOrThrow(name, r.blob), name);   // 反映到活编辑器（已解壳为明文）
-    return { ok: true, backupName };
   }
 
   // 真冲突的执行（pull/branch 在 Store 内做；keep/rename 交回 app 处理身份变更）。
@@ -355,9 +373,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
     localDirty?: () => boolean;
     busy?: Busy;
+    onReplaceStart?: () => void;   // N10：真要拉内容（etag 动过+clean）才触发——app 据此给非阻塞 status（auto-FF 无锁屏时解释挡笔）
   }
   async function refresh(name: string, opts: RefreshOpts = {}): Promise<FlowResult> {
-    const { isOnline = () => true, adopt, localDirty, busy = passBusy } = opts;
+    const { isOnline = () => true, adopt, localDirty, busy = passBusy, onReplaceStart } = opts;
     if (!isOnline()) return { status: "offline" };
     if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
     return busy("检查云端…", async () => {
@@ -368,6 +387,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       const base = seenBase(name);
       if (!base || meta.etag === base) return { status: "in-sync" };
       if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };  // fetchMeta 期间用户动了笔 → 放弃
+      if (onReplaceStart) onReplaceStart();   // N10：确定要拉内容了 → 通知 app（非阻塞 status）；此后 _safePull 置 replacing 挡笔
       const r = await _safePull(name, adopt);
       return r.ok ? { status: "fast-forwarded" } : { status: "ff-failed", reason: r.reason };
     });
@@ -391,17 +411,28 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
     const localPresent = local ? await local.exists(name) : false;
     if (!isOnline()) {
-      // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。队列须持久化（C1b 接 IDB）。
+      // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。N3：队列已持久化（kv），由 drainDeleteQueue 排空。
+      const baseEtag = cloud.getETag(name);            // 先取（local.trash 不动云态，但稳妥起见前置）
       let trashKey: string | null = null;
       if (localPresent) trashKey = await local!.trash(name);
-      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag: cloud.getETag(name), trashKey };
+      _enqueueDelete(name, baseEtag);                  // N3：持久化排队 → 重连 drainDeleteQueue 重放（base-etag 守卫防删错文件）
+      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag, trashKey };
     }
     return busy("删除中…", async () => {
       let cloudPresent = false;
       try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch (_) { cloudPresent = false; }
       if (cloudPresent) {
+        const wasDirty = cloud.isDirty(name);          // ★必须在 trash 前取：cloud.trash 内 clearState 后 isDirty 默认回 true
         const trashed = await cloud.trash(name);       // 先云端进 .trash（失败抛 → 本地不动）
-        if (localPresent) await local!.hardDelete(name);            // 再本地直接删（不留双份）
+        if (localPresent) {
+          if (wasDirty) {
+            // N5：本地有未推改动（这份字节「只有本地有」）→ 删除只删云端版；本地**留在目录里**降级为
+            //   local-only（解绑云端 etag/dirty）。绝不 hardDelete、不藏 backup——未推字节不可静默丢。
+            cloud.clearState(name);
+            return { status: "demoted-local-only", where: "cloud", trashed };
+          }
+          await local!.hardDelete(name);            // 干净副本 = 云端 .trash 已救着 → 硬删不丢、不留双份
+        }
         return { status: "trashed", where: "cloud", trashed };
       }
       if (localPresent) { const trashKey = await local!.trash(name); return { status: "trashed", where: "local", trashKey }; }
@@ -409,9 +440,39 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
+  // N3：离线删除队列**持久化**（kv）。entry = { name, baseEtag }（base 供重放时 If-Match 式守卫）。
+  const _DELQ_KEY = "delqueue:v1";
+  function _readDelQueue(): Array<{ name: string; baseEtag: string | null }> {
+    try { const raw = kv.get(_DELQ_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  }
+  function _writeDelQueue(q: Array<{ name: string; baseEtag: string | null }>): void {
+    if (q.length) kv.set(_DELQ_KEY, JSON.stringify(q)); else kv.remove(_DELQ_KEY);
+  }
+  function _enqueueDelete(name: string, baseEtag: string | null): void {
+    const q = _readDelQueue().filter((e) => e.name !== name);   // 同名去重，最新覆盖
+    q.push({ name, baseEtag });
+    _writeDelQueue(q);
+  }
+  // N3：重连重放离线删除队列。每条按 base-etag 守卫——**被别处改过（含同名新文件）→ conflict-edit-wins → 不删**
+  //   （正是「旧设备攒着删除、很久后上线，绝不能删掉别人的同名新文件」要防的）。终态出队；deferred-offline 留队。
+  async function drainDeleteQueue(): Promise<{ drained: number; deferred: number }> {
+    const q = _readDelQueue();
+    if (!q.length) return { drained: 0, deferred: 0 };
+    const remain: typeof q = [];
+    let drained = 0;
+    for (const e of q) {
+      let r: FlowResult;
+      try { r = await replayDelete(e.name, { baseEtag: e.baseEtag }); }
+      catch { remain.push(e); continue; }                       // 抛错（网络等）→ 留队重试
+      if (r.status === "deferred-offline") remain.push(e);       // 还没网 → 留队
+      else drained++;                                            // trashed/converged/conflict-edit-wins → 终态出队
+    }
+    _writeDelQueue(remain);
+    return { drained, deferred: remain.length };
+  }
+
   // C7：离线删除重连重放。按 base-etag 收敛；被别处改过 → delete-vs-edit 默认 edit-wins（不删）。
-  // NOT-WIRED（aspirational）：flow.delete 离线时返 queuedCloudDelete，但队列尚未持久化（C1b 接 IDB），
-  //   故此函数目前无调用方。保留为 C7 的唯一实现；接队列那轮再启用，别误当死码删掉。
+  //   N3：已接线——del() 离线时 _enqueueDelete 持久化，重连/上线由 app 调 flow.drainDeleteQueue 排空。
   async function replayDelete(name: string, opts: { baseEtag?: string | null } = {}): Promise<FlowResult> {
     const { baseEtag } = opts;
     let meta: FetchMetaResult | null;
@@ -436,7 +497,14 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return busy("恢复中…", async () => {
       let name: string | null = targetName || null, restoredLocal = false, restoredCloud = false;
       if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
-      if (fromCloud && cloudItemId != null) { await cloud.restore(cloudItemId, (name || targetName)!); restoredCloud = true; }
+      if (fromCloud && cloudItemId != null) {
+        const ritem = await cloud.restore(cloudItemId, (name || targetName)!) as { eTag?: string | null };
+        restoredCloud = true;
+        // N8：采纳恢复出的云 item 的 etag（cloud.restore 是 move → 新 etag）→ 之后 push 有 base，
+        //   不再「无 base → 409」对**用户自己的文件**弹假 CloudNameCollisionError。
+        const rname = name || targetName;
+        if (rname && ritem && ritem.eTag) { cloud.setETag(rname, ritem.eTag); _base.set(rname, ritem.eTag); }
+      }
       if (!restoredLocal && !restoredCloud) return { status: "noop" };
       return { status: "restored", name, local: restoredLocal, cloud: restoredCloud };
     });
@@ -537,9 +605,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         }
         if (bytes == null) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
         const res = await _doPush(newName, { encode: () => bytes, getEditVersion: gev, busy });  // dirty / 无旧云文件 → 推当前字节（含 B5/retry/conflict）
-        if (cloudOld) { try { await cloud.trash(oldName); } catch (_) {} }  // 旧名进 .trash，不 hard-delete（C5）
+        // N7：旧名进 .trash（不 hard-delete，C5）。失败**不再静默吞**——回报 oldCloudOrphan 让 caller
+        //   surface（否则旧云文件静默成孤儿，A9 复发）。新名已推成功，故不抛、不回滚，只标记。
+        let oldCloudOrphan = false;
+        if (cloudOld) { try { await cloud.trash(oldName); } catch (_) { oldCloudOrphan = true; } }
         _base.delete(oldName);
-        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res };
+        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res, oldCloudOrphan };
       } catch (e) {
         cloud.setDirty(newName, true); _base.delete(oldName);
         return { status: "renamed", where: "local", newName, cloudDeferred: true, error: e };
@@ -636,10 +707,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // transient busy（saving=本地 IDB 写盘中 / pushing=云端 push 中）：app 的 save 编排置位，status 只读（L4 ②b）。
   // 取代 app 的 _docSaving/_cloudPushing 全局——computeSaveState 从此只读 store，不再碰 app 态。
-  const _busy: { saving: boolean; pushing: boolean } = { saving: false, pushing: false };
+  const _busy: { saving: boolean; pushing: boolean; replacing: boolean } = { saving: false, pushing: false, replacing: false };
   let _pushIdleWaiters: Array<() => void> = [];
   const busy = {
-    set: (k: "saving" | "pushing", v: boolean) => {
+    set: (k: "saving" | "pushing" | "replacing", v: boolean) => {
       _busy[k] = !!v;
       if (k === "pushing" && !_busy.pushing && _pushIdleWaiters.length) {   // push 落地 → 唤醒所有等待者
         const ws = _pushIdleWaiters; _pushIdleWaiters = []; ws.forEach((r) => r());
@@ -647,6 +718,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     },
     saving: () => _busy.saving,
     pushing: () => _busy.pushing,
+    // N10：云端快进正在换本地字节/画布内容（_safePull 临界段）。input 起笔门读它降级 → 不在半换态上落笔。
+    //   gate 由 store 拥（SSoT），不再依赖 app 是否传了阻塞 busy overlay（auto-FF 原本传 undefined = 裸奔）。
+    replacing: () => _busy.replacing,
     // 等当前 push 跑完（L4 ②d）：取代 app 的 80ms 轮询 _awaitCloudPushIdle = 重抄 store serialize。
     // 无 push 在飞 → 立即 resolve；有 → 等 set("pushing",false) 那刻 resolve。
     whenPushIdle: (): Promise<void> => _busy.pushing ? new Promise<void>((r) => _pushIdleWaiters.push(r)) : Promise.resolve(),
@@ -702,7 +776,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const pw = crypt.getPassword ? crypt.getPassword(name) : null;
     if (!pw) return null;
     try { return await attempt(pw); }
-    catch (e: any) { if (e?.code === "WRONG_PASSWORD") return null; throw e; }
+    catch (e: unknown) { if ((e as { code?: string } | null | undefined)?.code === "WRONG_PASSWORD") return null; throw e; }
   }
 
   // UI 解锁循环的便宜验证器：解 name 的 peek（AES-GCM，快，不碰 7z、不开 UI、不进 busy）→ 密码对否。
@@ -781,7 +855,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return sub.serialize(name, async () => {
       const plain = await toU8(await encode());
       const sealed = await _seal(name, plain);
-      await (local!.save as any)(name, sealed, hint);
+      await local!.save(name, sealed, hint);
       return { status: "saved", local: true };
     });
   }
@@ -820,11 +894,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       if (item && item.eTag) _base.set(name, item.eTag);  // cloud.push 内已 setETag+setDirty(false)；这里推进本 tab base
       clearParent(name);                                  // episode 落地
       return { status: "swapped", cloud: true };
-    } catch (e: any) {
+    } catch (e: unknown) {
       // ② 本地已换、云端没跟上 → 标脏 + 锚 parent=换前云版，正常 push 流接力收敛
       _parent.set(name, prevEtag);
       cloud.setDirty(name, true);
-      if (e && e.name === "CloudConflictError") return { status: "conflict", dirtyAfter: true };
+      if (e && (e as { name?: string }).name === "CloudConflictError") return { status: "conflict", dirtyAfter: true };
       return { status: "cloud-deferred", dirtyAfter: true, error: e };
     }
   }
@@ -873,13 +947,13 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (local) {
       const blob = await local.get(name);
       if (blob) {
-        const size = (blob as any).size ?? (blob as any).length ?? 0;
-        const sliced = (blob as any).slice(Math.max(0, size - n));
+        const size = blob.size ?? (blob as { length?: number }).length ?? 0;
+        const sliced = blob.slice(Math.max(0, size - n)) as Blob | Uint8Array;
         return sliced instanceof Blob ? sliced : new Blob([sliced]);
       }
     }
-    if (tryCloud && (cloud as any).pullTail) {
-      const t = await (cloud as any).pullTail(name, n);
+    if (tryCloud && cloud.pullTail) {
+      const t = await cloud.pullTail(name, n);
       return t ? new Blob([t.bytes as BlobPart]) : null;
     }
     return null;
@@ -931,7 +1005,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   return {
     flow: {
-      push, open, refresh, acquire, replayDelete,         // 后台 / 读流：不进单飞守卫
+      push, open, refresh, acquire, replayDelete, drainDeleteQueue,   // 后台 / 读流：不进单飞守卫
       delete: _singleFlight("删除", del),
       rename: _singleFlight("重命名", rename),
       saveAs: _singleFlight("另存为", saveAs),
