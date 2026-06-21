@@ -89,7 +89,10 @@ export function createPersistence(): Persistence {
   const save = createValuableSave({
     debounceMs: cfg.POSITION_DEBOUNCE_MS,
     ceilingMs: cfg.POSITION_CEILING_MS,
-    commit: async () => { await catalog.commitNow(); lastPushed = snapshotPositions(); },
+    commit: async () => {
+      try { await catalog.commitNow(); lastPushed = snapshotPositions(); console.info("[jrp] 位置已落盘 catalog.json"); }
+      catch (e) { console.warn("[jrp] 位置落盘失败", e); throw e; }
+    },
     keepalive: () => { void catalog.commitNow(); },                 // unload:best-effort fire-forget
   });
 

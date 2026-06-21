@@ -61,16 +61,32 @@ export const App = defineComponent({
     // jumpscare:启动直开 lastActive 那篇那页(产品心脏:1-click resume,无 library 落地屏)。
     function jumpscare(): void {
       const cat = persistence().catalog;
-      const id = cat.lastActiveId(); if (!id) { galleryOpen.value = true; return; }
+      const id = cat.lastActiveId();
+      console.info("[jrp] resume lastActive =", id || "(无 → 开 gallery)");
+      if (!id) { galleryOpen.value = true; return; }
       const doc = cat.get(id); if (!doc || !doc.fileName) { galleryOpen.value = true; return; }
       void openPaper({ path: `${PAPERS_FOLDER}/${doc.fileName}`, name: doc.fileName, title: doc.title || doc.fileName });
     }
 
     onMounted(async () => {
+      const auth = persistence().auth;
+      let resumed = false;
+      // 登录真 resolve(含刷新后的后台 silent 探测,经 onAuthChanged)→ catalog.init + jumpscare(一次性)。
+      async function onSignedIn(): Promise<void> {
+        if (resumed) return; resumed = true;
+        await persistence().catalog.init();
+        jumpscare();
+      }
+      auth.onAuthChanged((st: any) => { if (st && st.signedIn) void onSignedIn(); });
       try {
-        const { signedIn } = await persistence().boot();
-        if (signedIn) jumpscare(); else galleryOpen.value = true;   // 没登录 → 开 gallery 让登录
+        const st = await auth.initAuth();
+        if (st.signedIn) await onSignedIn();   // 刚交互登录:同步就 signed
+        else galleryOpen.value = true;         // 未登录 / 探测中:先开 gallery;探测成功 onAuthChanged 会 jumpscare(自动关 gallery)
       } catch { galleryOpen.value = true; }
+      // 离开页面 best-effort 落盘待推位置(沿用老 code:可接受丢 1 次,代价 < 阻塞 unload)。
+      const flush = (): void => { persistence().save.flushKeepalive(); };
+      window.addEventListener("pagehide", flush);
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
     });
 
     return {
