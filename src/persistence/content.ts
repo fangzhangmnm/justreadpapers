@@ -22,6 +22,8 @@ export interface Content {
   rename(oldPath: string, newPath: string): Promise<void>;
   /** 软删:move 到 .trash(store 红线 move-aside)。 */
   trash(path: string): Promise<void>;
+  /** 新建文件夹(完整 approot 路径,如 "papers/组合")。idempotent。 */
+  ensureFolder(path: string): Promise<void>;
 }
 
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
@@ -45,5 +47,6 @@ export function createContent(cloud: CloudSync): Content {
     async upload(path, bytes) { await cloud.push(path, bytes); },
     async rename(oldPath, newPath) { await cloud.rename(oldPath, newPath); },
     async trash(path) { await cloud.trash(path); },
+    async ensureFolder(path) { await cloud.ensureFolder(path); },
   };
 }

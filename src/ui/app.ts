@@ -144,7 +144,7 @@ export const App = defineComponent({
         </button>
       </header>
       <div class="jrp-body">
-        <Gallery v-if="galleryOpen" @open="onGalleryOpen" @close="galleryOpen = false" />
+        <Gallery v-if="galleryOpen" @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" />
         <div class="jrp-backdrop" v-if="galleryOpen" @click="galleryOpen = false"></div>
         <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" @toast="onToast" /></div>
       </div>
