@@ -8,6 +8,8 @@ import { createCatalog } from "./catalog.ts";
 import type { Catalog } from "./catalog.ts";
 import { createContent } from "./content.ts";
 import type { Content } from "./content.ts";
+import { buildItems } from "../gallery-model.ts";
+import type { GalleryItem, CatalogMeta } from "../gallery-model.ts";
 import { createValuableSave } from "../domain/valuable-save.ts";
 import type { ValuableSave } from "../domain/valuable-save.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
@@ -48,6 +50,9 @@ export interface Persistence {
   content: Content;     // PDF 字节(只读镜像)
   settings: Settings;   // 设备本地
   save: ValuableSave;   // 位置节流,绑 catalog.commitNow
+  /** gallery seam:列 papers/ 下 PDF(剥前缀)⊕ catalog 标题 → {items, folders}。UI 自己 sliceFolder。
+   *  未登录/离线/失败 → 空 + complete:false(UI 据此别误判"空库")。 */
+  listGallery(): Promise<{ items: GalleryItem[]; folders: string[]; complete: boolean }>;
   /** 滚动汇报位置:trivial(同页+|Δy|<阈值)只标脏;否则排防抖。catalog 内存即时更新供 UI 读。 */
   recordPosition(docId: string, pos: Position): void;
   /** 启动:initAuth +(若登录)catalog.init。返回即时 auth 状态(后台 silent 探测经 auth.onAuthChanged)。 */
@@ -90,6 +95,22 @@ export function createPersistence(): Persistence {
 
   return {
     auth, catalog, content, settings, save,
+    async listGallery() {
+      const prefix = cfg.PAPERS_FOLDER + "/";
+      try {
+        const tree = await content.listTree();
+        const files = tree.files
+          .filter((f) => f.path.startsWith(prefix))
+          .map((f) => ({ name: f.path.slice(prefix.length), path: f.path }));
+        const folders = tree.folders
+          .filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length)).filter((p) => p.length > 0);
+        const catMap = new Map<string, CatalogMeta>();
+        for (const d of catalog.list()) catMap.set(d.fileName, { docId: d.id, name: d.fileName, title: d.title });
+        return { items: buildItems(files, catMap), folders, complete: tree.complete };
+      } catch {
+        return { items: [], folders: [], complete: false };   // 未登录/离线:别误判空库
+      }
+    },
     recordPosition(docId, pos): void {
       catalog.setPosition(docId, pos);                              // 内存即时(UI 读)
       if (isTrivial(lastPushed.get(docId), pos)) save.markTrivial();   // fidget:标脏不调度
