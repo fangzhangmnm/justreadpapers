@@ -33,8 +33,5 @@
   // 若 JRP 日后要加密(crypto-container) / 本地缓存适配器(local-adapter),补齐其缺失依赖再移出此列。
   "exclude": [
     "ARCHIVE", "src/vendor", "node_modules", ".claude",
-    "src/store/store.ts",
-    "src/store/index.ts",
-    "src/store/crypto-container.ts",
   ]
 }

@@ -19,6 +19,7 @@ import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalCache } fr
 import {
   looksEncryptedContainer, packContainer, unpackContainer,
   scanEncPeekFromEnd, decryptPeek, PEEK_TAIL_WINDOW,
+  configureCryptoCodec, type CryptoCodec,
 } from "./crypto-container.ts";
 
 // busy 包装的统一签名（注入的 _uiBusy / 各 flow 的 opts.busy / 默认 passBusy 共用）。
@@ -34,6 +35,8 @@ interface StoreDeps {
   backoffMs?: number;
   sleep?: (ms: number) => Promise<void>;
   busy?: Busy;
+  /** 加密 zip/7z codec（HOST-SEAM，2026-06-21 改注入）。不提供 = 加密不可用（JRP 不加密就不传，也不被 zip/7z 拖累）。 */
+  crypto?: CryptoCodec;
   /** 加密（ADR-0012）的 app 接缝——装配时注入一次，之后 save/load/push/pull 对调用方**完全透明**
    *  （encode 永远出明文、adopt/load 永远收明文，包壳/解壳全在 flow 里）。store 格式盲：
    *  makePeek 进出都是不透明字节（WebPaint 的解释=缩略图 PNG，文本 app 可以是摘要——store 不看）。
@@ -121,7 +124,8 @@ interface FlowResult {
  *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
  *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {}, validateAdopt }: StoreDeps = {} as StoreDeps) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {}, crypto, validateAdopt }: StoreDeps = {} as StoreDeps) {
+  if (crypto) configureCryptoCodec(crypto);   // 注入 zip/7z codec（HOST-SEAM）；不传则加密不可用
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
