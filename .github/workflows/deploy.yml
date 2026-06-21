@@ -43,20 +43,22 @@ jobs:
           path: main-tree
 
       - name: Compose site (prod=/, main=/dev/)
+        # ⚠ 非对称:prod(旧 app)= raw ES modules(无 build,index.html 直 load ./src/app.js,vendor
+        # 在 src/vendor)→ 要整个 src/;main(新 app)= bundled(load ./dist/jrp-<hash>.mjs,src/*.ts
+        # 是构建输入不部署)。重写 promote 到 prod 后,这块可对称化简。
         run: |
           mkdir -p site/dev
-          # 根级 PWA 元数据 + 图标 + SW + 运行时资源
-          for f in index.html manifest.webmanifest service-worker.js styles.css \
-                   icon.svg icon-192.png icon-512.png apple-touch-icon-180.png; do
-            cp -p prod-tree/$f site/        2>/dev/null || true
-            cp -p main-tree/$f site/dev/    2>/dev/null || true
+          # ---- prod → / (旧 raw-module app:静态根文件 + 整个 src/) ----
+          for f in index.html manifest.webmanifest service-worker.js icon.svg; do
+            cp -p prod-tree/$f site/ 2>/dev/null || true
           done
-          # 运行时 vendor(pdf.js/msal/vue 源) + bundle 产物。JRP 的 vendor 在 src/vendor。
-          # src/ 其余是构建输入,不进 deploy(bundle 后里头啥都不需要)。
-          cp -r prod-tree/src/vendor site/vendor      2>/dev/null || true
-          cp -r prod-tree/dist       site/dist        2>/dev/null || true
-          cp -r main-tree/src/vendor site/dev/vendor  2>/dev/null || true
-          cp -r main-tree/dist       site/dev/dist    2>/dev/null || true
+          cp -r prod-tree/src site/src 2>/dev/null || true
+          # ---- main → /dev/ (新 bundled app:bundle 子集,不要 src/*.ts) ----
+          for f in index.html manifest.webmanifest icon.svg styles.css; do
+            cp -p main-tree/$f site/dev/ 2>/dev/null || true
+          done
+          cp -r main-tree/dist       site/dev/dist   2>/dev/null || true
+          cp -r main-tree/src/vendor site/dev/vendor 2>/dev/null || true
           # /dev/ 不要 SW(改完即见,不走缓存层)
           rm -f site/dev/service-worker.js
 
