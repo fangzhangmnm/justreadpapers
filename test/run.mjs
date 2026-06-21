@@ -2,6 +2,7 @@
 // 加新测试文件:在下面 import 一行即可。
 import "./valuable-save.test.ts";
 import "./doc-id.test.ts";
+import "./viewer-geometry.test.ts";
 import { run } from "./_harness.ts";
 
 await run();
