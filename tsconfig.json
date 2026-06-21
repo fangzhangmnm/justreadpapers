@@ -36,6 +36,5 @@
     "src/store/store.ts",
     "src/store/index.ts",
     "src/store/crypto-container.ts",
-    "src/store/local-adapter.ts"
   ]
 }

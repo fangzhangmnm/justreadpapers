@@ -14,7 +14,7 @@
 
 import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
 import type { Bytes, BytesSource } from "./substrate.ts";
-import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalAdapter } from "./types.ts";
+import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalCache } from "./types.ts";
 // 加密容器（ADR-0012）：机制层，格式盲（data.bin / peek 都是不透明字节）。
 import {
   looksEncryptedContainer, packContainer, unpackContainer,
@@ -28,7 +28,7 @@ const passBusy: Busy = (label, fn) => fn();   // 默认 busy：直接跑
 // createStore 的注入依赖。
 interface StoreDeps {
   cloud: CloudSync;
-  local?: LocalAdapter;
+  local?: LocalCache;
   kv: Kv;
   maxAttempts?: number;
   backoffMs?: number;
@@ -847,7 +847,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // ---- flow.save / flow.load：本地持久化也走深模块（明文绝不落盘）----
-  // save：encode 出明文 → 按加密态包壳 → local.save。hint 是给 LocalAdapter 的 app 旁路
+  // save：encode 出明文 → 按加密态包壳 → local.save。hint 是给 LocalCache 的 app 旁路
   //   （如 WebPaint 把活 doc 现成的缩略图带过去省一次解码），store 不解释、原样透传。
   interface SaveOpts { encode: () => BytesSource | Promise<BytesSource>; hint?: unknown; }
   async function save(name: string, { encode, hint }: SaveOpts): Promise<FlowResult> {
