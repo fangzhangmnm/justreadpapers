@@ -1,4 +1,4 @@
-// 根组件。P3:topbar(打开本地 PDF + zoom/spread 控件 + 页码)+ Viewer(主表面)。
+// 根组件。P3:topbar(打开本地 PDF + zoom/spread/截图/复制 + 页码)+ Viewer(主表面)+ toast。
 // 后续:resume 编排、library panel、folder-tree、云选项 挂这里。
 import { defineComponent, ref } from "../vendor/vue/vue.esm-browser.prod.js";
 import { Viewer } from "./viewer.ts";
@@ -14,8 +14,15 @@ export const App = defineComponent({
     const fileName = ref("");
     const page = ref(0);
     const total = ref(0);
-    const spread = ref(0);   // 0 单页 / 1 双页
+    const spread = ref(0);            // 0 单页 / 1 双页
+    const toast = ref("");
+    let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+    function showToast(msg: string): void {
+      toast.value = msg;
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.value = ""; }, 2200);
+    }
     async function onFile(e: Event): Promise<void> {
       const input = e.target as HTMLInputElement;
       const f = input.files && input.files[0];
@@ -26,15 +33,18 @@ export const App = defineComponent({
     const v = (): any => viewerRef.value;
 
     return {
-      viewerRef, pos, fileName, page, total, spread,
+      viewerRef, pos, fileName, page, total, spread, toast,
       onFile,
       onPos: (p: Position): void => { pos.value = p; },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
       onSpread: (m: number): void => { spread.value = m; },
+      onToast: showToast,
       zoomIn: (): void => v()?.zoomIn(),
       zoomOut: (): void => v()?.zoomOut(),
       fitWidth: (): void => v()?.fitWidth(),
       toggleSpread: (): void => v()?.toggleSpread(),
+      screenshot: (): void => v()?.screenshot(),
+      copyText: (): void => v()?.copyText(),
     };
   },
   template: `
@@ -46,11 +56,14 @@ export const App = defineComponent({
           <button class="jrp-btn" @click="fitWidth" title="适配宽度">适配</button>
           <button class="jrp-btn" @click="zoomIn" title="放大">＋</button>
           <button class="jrp-btn" @click="toggleSpread">{{ spread ? '单页' : '双页' }}</button>
+          <button class="jrp-btn" @click="screenshot" title="截当前页到剪贴板,粘给 AI 问">截图</button>
+          <button class="jrp-btn" @click="copyText" title="复制当前页文本(公式出 glyph)">复制</button>
         </div>
         <span class="jrp-fname">{{ fileName || '选一份本地 PDF 试 viewer' }}</span>
         <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}<template v-if="pos"> · {{ Math.round(pos.yFraction * 100) }}%</template></span>
       </header>
-      <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" /></div>
+      <div class="jrp-viewer-wrap"><Viewer ref="viewerRef" @position="onPos" @page="onPage" @spread="onSpread" @toast="onToast" /></div>
+      <div class="jrp-toast" v-if="toast">{{ toast }}</div>
     </div>
   `,
 });

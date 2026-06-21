@@ -32,7 +32,7 @@ function clampScale(s: number): number { return Math.min(Math.max(s, SCALE_MIN),
 
 export const Viewer = defineComponent({
   name: "Viewer",
-  emits: ["position", "page", "spread"],
+  emits: ["position", "page", "spread", "toast"],
   setup(_props: unknown, ctx: SetupCtx) {
     const containerRef = ref<HTMLElement | null>(null);
     let lib: any = null, ns: any = null, viewer: any = null, eventBus: any = null, linkService: any = null, pdf: any = null;
@@ -141,8 +141,34 @@ export const Viewer = defineComponent({
       c?.removeEventListener("wheel", onWheel);
     });
 
+    // Quest 核心:截当前页 canvas → 剪贴板 PNG(拿去问 AI)。
+    async function screenshot(): Promise<void> {
+      const c = containerRef.value; if (!c || !viewer) return;
+      const n = viewer.currentPageNumber;
+      const canvas = c.querySelector(`.pdfViewer .page[data-page-number="${n}"] canvas`) as HTMLCanvasElement | null;
+      if (!canvas) { ctx.emit("toast", "当前页还没渲染好"); return; }
+      try {
+        const blob: Blob = await new Promise((res, rej) =>
+          canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob null"))), "image/png"));
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        ctx.emit("toast", `已截图第 ${n} 页到剪贴板`);
+      } catch { ctx.emit("toast", "截图失败(剪贴板不支持?)"); }
+    }
+    // 复制当前页文本(LaTeX 公式出 glyph 非源码,tooltip 已注明)。
+    async function copyText(): Promise<void> {
+      if (!pdf || !viewer) return;
+      const n = viewer.currentPageNumber;
+      try {
+        const page = await pdf.getPage(n);
+        const tc = await page.getTextContent();
+        const text = (tc.items as any[]).map((it) => ("str" in it ? it.str : "")).join(" ").replace(/\s+/g, " ").trim();
+        await navigator.clipboard.writeText(text);
+        ctx.emit("toast", `已复制第 ${n} 页文本 (${text.length} 字)`);
+      } catch { ctx.emit("toast", "复制文本失败"); }
+    }
+
     ctx.expose({
-      loadBlob,
+      loadBlob, screenshot, copyText,
       zoomIn: (): void => zoomAround(ZOOM_STEP),
       zoomOut: (): void => zoomAround(1 / ZOOM_STEP),
       fitWidth: (): void => { settings().setNum(zoomfKey(), 1); void applyFit(); },
