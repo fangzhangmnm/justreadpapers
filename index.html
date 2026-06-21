@@ -75,6 +75,12 @@
   .jrp-tri { display: inline-block; width: 16px; opacity: 0.5; }
   .jrp-gal-file.cached::after { content: '·'; color: #2a8a6a; margin-left: 6px; }
   .jrp-gal-msg { padding: 16px; opacity: 0.5; font-size: 13px; }
+  .jrp-outline { position: absolute; right: 0; top: 0; bottom: 0; width: min(320px, 84vw); z-index: 9;
+    background: var(--bg); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.18); }
+  .jrp-ol-row { padding: 8px 14px; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jrp-ol-row:hover { background: var(--hover); }
+  .jrp-icon.pad { margin-left: auto; }
   /* ☰ 系统菜单:z-index 提到所有层之上 + backdrop(避 z-order 坑) */
   .jrp-menu-backdrop { position: fixed; inset: 0; z-index: 99; }
   .jrp-menu { position: fixed; top: calc(46px + env(safe-area-inset-top)); right: 10px; z-index: 100;
@@ -84,6 +90,10 @@
     background: transparent; color: var(--fg); font-size: 14px; cursor: pointer; }
   .jrp-menu-item:hover:not([disabled]) { background: var(--hover); }
   .jrp-menu-item[disabled] { opacity: 0.4; cursor: default; }
+  .jrp-menu-zoom { display: flex; }
+  .jrp-menu-zoom button { flex: 1; border: none; background: transparent; color: var(--fg); padding: 11px 0; cursor: pointer; font-size: 15px; }
+  .jrp-menu-zoom button:hover { background: var(--hover); }
+  .jrp-menu-sep { height: 1px; background: var(--line2); margin: 4px 0; }
   .jrp-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
     background: rgba(44,38,32,0.92); color: #f4efe4; padding: 8px 16px; border-radius: 8px;
     font-size: 13px; z-index: 60; pointer-events: none; }
@@ -94,6 +104,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-8c802b7d1b56.mjs"></script>
+<script type="module" src="./dist/jrp-16f73cdaffc9.mjs"></script>
 </body>
 </html>

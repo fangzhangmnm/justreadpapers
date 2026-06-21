@@ -32,7 +32,7 @@ function clampScale(s: number): number { return Math.min(Math.max(s, SCALE_MIN),
 
 export const Viewer = defineComponent({
   name: "Viewer",
-  emits: ["position", "page", "spread", "toast"],
+  emits: ["position", "page", "spread", "toast", "outline"],
   setup(_props: unknown, ctx: SetupCtx) {
     const containerRef = ref<HTMLElement | null>(null);
     let lib: any = null, ns: any = null, viewer: any = null, eventBus: any = null, linkService: any = null, pdf: any = null;
@@ -114,6 +114,7 @@ export const Viewer = defineComponent({
       pdf = await task.promise;
       viewer.setDocument(pdf);
       linkService.setDocument(pdf);
+      void pdf.getOutline().then((o: any) => ctx.emit("outline", o || [])).catch(() => ctx.emit("outline", []));
     }
 
     onMounted(async () => {
@@ -169,6 +170,7 @@ export const Viewer = defineComponent({
 
     ctx.expose({
       loadBlob, screenshot, copyText,
+      goToDest: (dest: unknown): void => { try { linkService.goToDestination(dest); } catch { /* */ } },
       zoomIn: (): void => zoomAround(ZOOM_STEP),
       zoomOut: (): void => zoomAround(1 / ZOOM_STEP),
       fitWidth: (): void => { settings().setNum(zoomfKey(), 1); void applyFit(); },
