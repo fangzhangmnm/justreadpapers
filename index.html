@@ -8,16 +8,28 @@
 <meta name="theme-color" content="#d8c8a8">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg">
+<link rel="stylesheet" href="./vendor/pdfjs/web/pdf_viewer.css">
 <style>
   html, body { margin: 0; height: 100%; background: #f4efe4; color: #2c2620;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #app { height: 100%; }
-  .jrp-shell { height: 100%; display: grid; place-items: center; }
-  .jrp-boot { opacity: 0.6; font-size: 14px; }
+  #app, .jrp-shell { height: 100%; }
+  .jrp-shell { display: flex; flex-direction: column; }
+  .jrp-topbar { flex: none; display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; padding-top: calc(8px + env(safe-area-inset-top));
+    background: #ece3d2; border-bottom: 1px solid #d8c8a8; font-size: 13px; }
+  .jrp-open { cursor: pointer; padding: 5px 12px; border-radius: 6px;
+    background: #2c2620; color: #f4efe4; }
+  .jrp-fname { opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jrp-pos { margin-left: auto; opacity: 0.6; font-variant-numeric: tabular-nums; }
+  .jrp-viewer-wrap { position: relative; flex: 1; min-height: 0; }
+  .jrp-viewer { position: absolute; inset: 0; overflow-y: scroll; }
+  /* pdf.js 暗底改纸感暖底 */
+  .jrp-viewer .pdfViewer .page { margin: 10px auto; border: none;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.18); }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-927b84406769.mjs"></script>
+<script type="module" src="./dist/jrp-802f594d4ea8.mjs"></script>
 </body>
 </html>
