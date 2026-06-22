@@ -5,6 +5,7 @@ import "./doc-id.test.ts";
 import "./viewer-geometry.test.ts";
 import "./catalog.test.ts";
 import "./collection.test.ts";
+import "./settings.test.ts";
 import "./gallery-model.test.ts";
 import { run } from "./_harness.ts";
 
