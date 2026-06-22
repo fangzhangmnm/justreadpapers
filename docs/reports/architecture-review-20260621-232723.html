@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>store.ts 架构深化报告 — 单一职责拆分</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "dark", securityLevel: "loose" });</script>
+<style>
+  body { background:#0b0e14; color:#cdd6f4; }
+  .card { background:#11151c; border:1px solid #1f2733; }
+  .mono { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; }
+  .badge-strong { background:#f38ba8; color:#11151c; }
+  .badge-worth { background:#f9e2af; color:#11151c; }
+  .badge-spec { background:#89b4fa; color:#11151c; }
+  .pill { background:#1f2733; color:#a6adc8; }
+  .redline { color:#f38ba8; }
+  .glue { color:#6c7086; }
+  .mermaid { background:#0b0e14; border-radius:8px; padding:8px; }
+  h2 { scroll-margin-top: 1rem; }
+</style>
+</head>
+<body class="px-4 md:px-10 py-8 max-w-6xl mx-auto">
+
+<header class="mb-10">
+  <div class="text-sm pill inline-block px-3 py-1 rounded-full mb-3">架构深化 · sync-store 引擎</div>
+  <h1 class="text-3xl md:text-4xl font-bold mb-3">把 <span class="mono text-amber-300">store.ts</span> 从神文件拆成深模块</h1>
+  <p class="text-slate-400 leading-relaxed max-w-3xl">
+    单一职责分析：1050 行的 <span class="mono">store.ts</span> 把<strong class="redline">关键红线业务逻辑</strong>和<strong class="glue">编排胶水</strong>塞在同一个闭包里。
+    它们<em>看起来</em>是组合层，其实是一组各司其职的深模块。本报告按职责线把它们切开，<span class="mono">createStore</span> 收成薄组合根。
+    用语依 <span class="mono">LANGUAGE.md</span>（Module / Seam / Depth / 删除测试 / Locality / Leverage）。
+  </p>
+  <div class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+    <div class="card rounded-lg p-3"><div class="text-2xl font-bold text-amber-300">1050</div><div class="text-slate-500">store.ts 行数</div></div>
+    <div class="card rounded-lg p-3"><div class="text-2xl font-bold redline">0</div><div class="text-slate-500">JRP 里测它的测试</div></div>
+    <div class="card rounded-lg p-3"><div class="text-2xl font-bold text-sky-300">8</div><div class="text-slate-500">co-located 红线职责</div></div>
+    <div class="card rounded-lg p-3"><div class="text-2xl font-bold text-green-300">2</div><div class="text-slate-500">已抽脊椎(substrate/cloud-sync)</div></div>
+  </div>
+</header>
+
+<!-- OVERVIEW -->
+<section class="mb-12">
+  <h2 class="text-2xl font-bold mb-4">总览：现在 vs 目标</h2>
+  <div class="grid md:grid-cols-2 gap-5">
+    <div class="card rounded-xl p-4">
+      <div class="text-sm font-semibold text-slate-400 mb-2">现在 — 一个神文件，红线与胶水纠缠</div>
+      <div class="mermaid">
+flowchart TB
+  subgraph S["store.ts (1050 行 · 一个闭包)"]
+    direction TB
+    base["_base/_parent + bypass 守卫<br/>(W2 红线)"]
+    seal["_seal/_unseal/_withPassword<br/>(加密透明)"]
+    safe["_safePull/_tryHeal/_resolveConflict<br/>(永不丢字节)"]
+    push["_doPush"]
+    fresh["open/refresh"]
+    del["del/replayDelete/drainQueue"]
+    ident["rename/saveAs/acquire"]
+    trash["restore/purge/emptyTrash"]
+    glue["busy/autosave/single-flight/edit<br/>(胶水)"]
+  end
+  push --> base & safe & seal
+  fresh --> base & safe
+  del --> base
+  ident --> base
+  safe --> base & seal
+  class S fill:#1a1320,stroke:#f38ba8
+      </div>
+      <p class="text-xs text-slate-500 mt-2">8 个红线职责共用一个闭包作用域 → 看似耦合，实为<strong>偶然</strong>耦合（共享闭包），不是<strong>本质</strong>耦合。改一处怕碰另一处；无法单测。</p>
+    </div>
+    <div class="card rounded-xl p-4">
+      <div class="text-sm font-semibold text-slate-400 mb-2">目标 — 脊椎 + 深模块 + 薄组合根</div>
+      <div class="mermaid">
+flowchart TB
+  root["createStore<br/>(薄组合根 · 接线)"]
+  subgraph SP["有状态脊椎"]
+    sub["substrate<br/>(已抽)"]
+    base["base-lineage<br/>(W2 脊椎)"]
+  end
+  subgraph FM["单一职责红线深模块"]
+    seal["seal"]
+    safe["safe-resolve"]
+    push["push"]
+    fresh["freshness"]
+    del["delete"]
+    ident["identity"]
+    trash["trash"]
+  end
+  root --> SP & FM
+  push --> base & safe & seal
+  fresh --> base & safe
+  safe --> base & seal
+  class SP fill:#13201a,stroke:#a6e3a1
+  class FM fill:#131a26,stroke:#89b4fa
+      </div>
+      <p class="text-xs text-slate-500 mt-2">每个红线职责成独立深模块（小接口、大行为），吃<strong>脊椎</strong>（substrate + base-lineage）+ cloud/local。<span class="mono">createStore</span> 只剩接线 + 新 API facets。每块可单测。</p>
+    </div>
+  </div>
+  <div class="card rounded-xl p-4 mt-5 border-l-4" style="border-left-color:#f9e2af">
+    <div class="font-semibold text-amber-200 mb-1">⚠ 两条 etag 轨道，拆分时绝不能并</div>
+    <p class="text-sm text-slate-400">cloud-sync 拥 <span class="mono">kv</span> 里的<strong>持久/跨 tab</strong> etag+dirty；store.ts 另拥一个 <span class="mono">_base</span>（本 tab 已见云版）。
+    push 的 If-Match 用 <span class="mono">_base</span>/<span class="mono">_parent</span>，<strong class="redline">绝不</strong>用 kv 共享 etag——否则别的 tab 推成功改了共享 etag，本 tab 陈旧推被误判"无冲突"→ 静默覆盖（W2）。
+    <strong>base-lineage 拥 <span class="mono">_base</span>，cloud-sync 拥 kv，两者只在 open/adopt 时单向 seed。</strong></p>
+  </div>
+</section>
+
+<h2 class="text-2xl font-bold mb-5">深化候选</h2>
+
+<!-- C1 -->
+<article class="card rounded-xl p-5 mb-6">
+  <div class="flex items-start justify-between gap-4 mb-3">
+    <div>
+      <div class="text-xs pill inline-block px-2 py-0.5 rounded mb-1">候选 1 · 脊椎</div>
+      <h3 class="text-xl font-bold">抽出 <span class="mono text-green-300">base-lineage</span> — 每-tab 云版谱系 + bypass 守卫</h3>
+    </div>
+    <span class="badge-strong text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">Strong</span>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">涉及</div>
+      <p class="mono text-xs text-slate-400 mb-3">_base · _parent · seenBase · captureParent · reparent · clearParent · parentFor · hasParent · adoptBase · cloudState.setDirty 门 · _doPush 的 bypass 守卫</p>
+      <div class="text-slate-500 font-semibold mb-1">问题</div>
+      <p class="text-slate-300 mb-3">整个库<strong class="redline">最危险</strong>的红线（W2：push 必须以 parentBase 为 If-Match，绝不用共享 etag，否则静默覆盖）现在是 9 个闭包函数 + 2 个 Map，被 5 个职责（push/freshness/delete/identity/seal）读。<strong>没有一处</strong>叫"这个 tab 的未推编辑派生自哪个云版"。bypass 守卫（那个宁可抛错也不静默覆盖的判断）<strong class="redline">零测试</strong>。</p>
+      <div class="text-slate-500 font-semibold mb-1">删除测试</div>
+      <p class="text-slate-300">把它内联掉 → 谱系逻辑在每个会 push/adopt 的 flow 里重新长出来（5+ 处）。复杂度<strong>集中重现</strong> = 它在挣自己的工钱 → 该成深模块。</p>
+    </div>
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">方案</div>
+      <p class="text-slate-300 mb-3">一个有状态 <span class="mono">base-lineage</span> 模块拥 <span class="mono">_base</span>+<span class="mono">_parent</span>，暴露小接口：<span class="mono">ifMatchFor(name)</span> / <span class="mono">seenBase</span> / <span class="mono">capture/reparent/clear</span> / <span class="mono">adopt(name,etag)</span> / <span class="mono">assertNotBypassing(name)</span>。一个实例穿过所有 flow。</p>
+      <div class="text-slate-500 font-semibold mb-1">收益（locality + leverage + 测试）</div>
+      <ul class="text-slate-300 list-disc pl-4 space-y-1 mb-3">
+        <li><strong>Locality</strong>：最致命的不变量住一个文件、一套测试。</li>
+        <li><strong>Leverage</strong>：push/freshness/delete 从 3 方法接口拿到 If-Match 正确性，不再各自重推。</li>
+        <li><strong>测试</strong>：mock-provider 的 fault-inject 已就绪 → 注入陈旧 base → 断言<strong>抛错而非覆盖</strong>。</li>
+      </ul>
+      <div class="mermaid">
+flowchart LR
+  A["陈旧 base"] --> G{"assertNotBypassing"}
+  G -->|"缺 parentBase"| T["throw(响亮)"]
+  G -->|"有 parentBase"| P["push If-Match"]
+  class T fill:#2a1620,stroke:#f38ba8
+  class P fill:#13201a,stroke:#a6e3a1
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- C2 -->
+<article class="card rounded-xl p-5 mb-6">
+  <div class="flex items-start justify-between gap-4 mb-3">
+    <div>
+      <div class="text-xs pill inline-block px-2 py-0.5 rounded mb-1">候选 2 · 红线</div>
+      <h3 class="text-xl font-bold">抽出 <span class="mono text-green-300">safe-resolve</span> — 永不丢字节（备份/校验/自愈/化解）</h3>
+    </div>
+    <span class="badge-strong text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">Strong</span>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">涉及</div>
+      <p class="mono text-xs text-slate-400 mb-3">_safePull · _tryHeal · _resolveConflict</p>
+      <div class="text-slate-500 font-semibold mb-1">问题</div>
+      <p class="text-slate-300 mb-3">A4/A10（备份先于覆盖）、R1（采纳后置 etag）、N2（validateAdopt 闸挡 captive-portal HTML）、B5（lost-response 自愈）四条红线是 3 个私有函数，<strong>同时</strong>被 push 和 open/freshness 调。最灾难的"备份→校验→覆盖→采纳"顺序<strong class="redline">没有任何测试</strong>。</p>
+      <div class="text-slate-500 font-semibold mb-1">删除测试</div>
+      <p class="text-slate-300">内联 → push 和 freshness 各自重写"备份再覆盖"。复杂度集中重现 → 深模块。</p>
+    </div>
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">方案</div>
+      <p class="text-slate-300 mb-3"><span class="mono">safe-resolve</span> 模块：<span class="mono">safePull(name, adopt)</span> / <span class="mono">tryHeal(name, bytes)</span> / <span class="mono">resolveConflict(name, choice, ctx)</span>。拥那条不可重排的顺序；吃 cloud(pull/weakOverride) + base-lineage(落地后 commit etag) + local(backup/save)。</p>
+      <div class="text-slate-500 font-semibold mb-1">收益</div>
+      <ul class="text-slate-300 list-disc pl-4 space-y-1 mb-3">
+        <li>永不丢的顺序集中一处。</li>
+        <li><strong>测试现成</strong>：mock-provider 的 <span class="mono">lostResponse</span> fault 已建 → 断言 heal 收敛、断言 dirty 先备份后覆盖。</li>
+      </ul>
+      <div class="mermaid">
+flowchart TB
+  P["safePull"] --> B{"dirty?"}
+  B -->|"是"| BK["local.backup"]
+  B -->|"clean(ADR-0016)"| SK["跳备份"]
+  BK --> V & SK --> V
+  V{"validateAdopt"} -->|"假字节"| X["拒绝·不覆盖"]
+  V -->|"真容器"| OW["覆盖→采纳 etag(后置)"]
+  class X fill:#2a1620,stroke:#f38ba8
+  class OW fill:#13201a,stroke:#a6e3a1
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- C3 -->
+<article class="card rounded-xl p-5 mb-6">
+  <div class="flex items-start justify-between gap-4 mb-3">
+    <div>
+      <div class="text-xs pill inline-block px-2 py-0.5 rounded mb-1">候选 3 · 红线 · 最高测试欠债</div>
+      <h3 class="text-xl font-bold">抽出 <span class="mono text-green-300">seal</span> — at-rest 加密透明</h3>
+    </div>
+    <span class="badge-strong text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">Strong</span>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">涉及</div>
+      <p class="mono text-xs text-slate-400 mb-3">_seal · _unseal · _unsealOrThrow · _withPassword · _lockedErr · verifyPassword · getTailBytes · decryptPeekBytes · readPeek · crypto-container 全部耦合</p>
+      <div class="text-slate-500 font-semibold mb-1">问题</div>
+      <p class="text-slate-300 mb-3">加密透明（encode 永出明文、写前包壳读后解壳、非交互密码）摊在 ~12 个函数，且<strong>泄漏</strong>进 open(:206 looksEncrypted) 和 safe-resolve(:293 weakOverride encrypted 标志)。crypto-container 的 <span class="mono">_codec</span>/<span class="mono">_keyCache</span> 是<strong>模块级单例</strong>。JRP 里<strong class="redline">零加密测试</strong>——全库最大的未测红线。</p>
+      <div class="text-slate-500 font-semibold mb-1">删除测试</div>
+      <p class="text-slate-300">内联 → 每条读/写路径重写"是不是加密？解/包壳"。集中重现 → 深模块。</p>
+    </div>
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">方案</div>
+      <p class="text-slate-300 mb-3"><span class="mono">seal</span> 模块包住 crypto-container：<span class="mono">sealForWrite(name, plain)</span> / <span class="mono">unsealForRead(name, bytes)</span> / <span class="mono">withPassword</span> / <span class="mono">verifyPassword</span> / <span class="mono">readPeek</span> / <span class="mono">isContainer</span>。加密知识收一处；open/safe-resolve 经 <span class="mono">seal.isContainer()</span> 这个 seam 调，不再直 import crypto-container。</p>
+      <div class="text-slate-500 font-semibold mb-1">收益 + 待解子问题</div>
+      <ul class="text-slate-300 list-disc pl-4 space-y-1">
+        <li>唯一懂容器的地方；可测（seal/unseal round-trip、locked→status、错密码）。</li>
+        <li>对接 STORE.md 的 <span class="mono">sevenZip</span> 注入（#78）+ <span class="mono">ZipFile.setPreview</span>。</li>
+        <li class="text-amber-300">⚠ 子问题：<span class="mono">_codec</span> 模块单例 → seal 要每-实例需先动 <span class="mono">configureCryptoCodec</span>。grill 时定。</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- C4 -->
+<article class="card rounded-xl p-5 mb-6">
+  <div class="flex items-start justify-between gap-4 mb-3">
+    <div>
+      <div class="text-xs pill inline-block px-2 py-0.5 rounded mb-1">候选 4 · flow 群</div>
+      <h3 class="text-xl font-bold">把 <span class="mono text-sky-300">push / freshness / delete / identity / trash</span> 提到脊椎上</h3>
+    </div>
+    <span class="badge-worth text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">Worth exploring</span>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">问题</div>
+      <p class="text-slate-300 mb-3">这 5 个是各自独立的单一职责 flow，现在共用一个闭包 → <strong>看似</strong>耦合。实际每个只碰脊椎 + cloud/local + 自己的 opts。耦合是<strong>偶然的</strong>（共享闭包），非本质。delete 的 base-guard 重放（"旧设备苏醒，绝不删别人的同名新文件"）这条红线也没测。</p>
+      <div class="text-slate-500 font-semibold mb-1">删除测试</div>
+      <p class="text-slate-300">把任一 flow 内联回 → 其它 flow 不受影响（它们本就不互调，除 identity 内部走 _doPush）。说明它们本是独立模块。</p>
+    </div>
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">方案</div>
+      <p class="text-slate-300 mb-3">每个 flow 成模块，吃 <span class="mono">(substrate, base-lineage, safe-resolve, seal, cloud, local)</span> + 自己 opts。<span class="mono">createStore</span> 接线。先做完候选 1-3（脊椎/safe-resolve/seal）再做这层。</p>
+      <div class="text-slate-500 font-semibold mb-1">收益</div>
+      <ul class="text-slate-300 list-disc pl-4 space-y-1">
+        <li>每个 flow 对着 mock-provider 单测。</li>
+        <li>delete-queue 的 base-guard 重放拿到专测。</li>
+        <li>对接新 API：push/freshness 喂 <span class="mono">RawFile.save/open</span>，delete/identity 喂 <span class="mono">file.delete/rename</span>。</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- C5 -->
+<article class="card rounded-xl p-5 mb-8">
+  <div class="flex items-start justify-between gap-4 mb-3">
+    <div>
+      <div class="text-xs pill inline-block px-2 py-0.5 rounded mb-1">候选 5 · 组合根 + 新 API</div>
+      <h3 class="text-xl font-bold"><span class="mono text-sky-300">createStore</span> 收成薄组合根 + STORE.md facets</h3>
+    </div>
+    <span class="badge-worth text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">Worth exploring</span>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">问题</div>
+      <p class="text-slate-300 mb-3">今天 <span class="mono">createStore</span> <strong>就是</strong>那 1050 行——既是组合根又是每个实现。新 STORE.md API（file/collection/settings/encryption + Model B <span class="mono">ui</span> bundle）需要一个<strong>是胶水、不是 guts</strong> 的落脚处。</p>
+      <div class="text-slate-500 font-semibold mb-1">删除测试（反向）</div>
+      <p class="text-slate-300">候选 1-4 抽走后，<span class="mono">createStore</span> 删掉的复杂度<strong>不</strong>重现在别处——剩下的纯是接线（provider→cloud/local、实例化模块、映射 ui）。证明它本该是薄的。</p>
+    </div>
+    <div>
+      <div class="text-slate-500 font-semibold mb-1">方案</div>
+      <p class="text-slate-300 mb-3"><span class="mono">createStore</span> 缩到 ~150 行接线：build cloud/local from provider → 实例化脊椎 + flow 模块 → 把 <span class="mono">ui={busy,askPassword,resolveConflict,reportError}</span> 映射到各 flow 回调 → 暴露 <span class="mono">file()/collection()/localSettings/syncedSettings/encryption</span>。</p>
+      <div class="text-slate-500 font-semibold mb-1">收益</div>
+      <ul class="text-slate-300 list-disc pl-4 space-y-1">
+        <li>组合根读起来像接线图。</li>
+        <li>新 API 面与红线 guts 解耦；ui 映射住一处。</li>
+        <li>胶水（busy/autosave/single-flight/edit）留这里，薄。</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- TOP REC -->
+<section class="card rounded-xl p-6 mb-10 border-l-4" style="border-left-color:#a6e3a1">
+  <h2 class="text-2xl font-bold mb-3 text-green-300">首选：从脊椎切第一刀</h2>
+  <p class="text-slate-300 mb-4 leading-relaxed">
+    按 <strong>候选 1 → 2 → 3 → 4 → 5</strong> 的依赖序走，<strong>每抽一个模块当场补它的单测</strong>（把红线落进测试，给这次重构兜底）：
+  </p>
+  <ol class="space-y-3 text-sm">
+    <li class="flex gap-3"><span class="badge-strong font-bold px-2 rounded">1</span><div><strong>base-lineage</strong> 先抽——它是 W2 脊椎，其他全依赖它；先把 bypass 守卫（最危险、零测的红线）落进测试。</div></li>
+    <li class="flex gap-3"><span class="badge-strong font-bold px-2 rounded">2</span><div><strong>safe-resolve</strong> + <strong>seal</strong>——两条永不丢/加密红线，都没测，且 mock-provider 的 fault-inject 已就绪，测试成本低。</div></li>
+    <li class="flex gap-3"><span class="badge-worth font-bold px-2 rounded">3</span><div><strong>flow 群</strong> 逐个提到脊椎上，各自单测。</div></li>
+    <li class="flex gap-3"><span class="badge-worth font-bold px-2 rounded">4</span><div><strong>createStore</strong> 收成薄组合根 + 接 file/collection/settings/encryption + ui 映射。</div></li>
+  </ol>
+  <p class="text-slate-400 mt-4 text-sm">
+    这条路符合家族"从中间切蛋糕、禁止刮痧"——<strong>职责线就是深切线</strong>；guts 逻辑一行不改，只是搬家到各自文件 + 补测。
+    且不违反"同步引擎改前 escalate"（本报告即 escalation；guts 不动）。collection / settings 已照此抽好、测过（42 passed）——是这套打法的样板。
+  </p>
+</section>
+
+<footer class="text-xs text-slate-600 border-t border-slate-800 pt-4">
+  背景：<span class="mono">STORE.md</span>（新 API 设计 SSoT，Model B）· <span class="mono">OLD-ENGINE.md</span>（旧引擎 seam 全貌）·
+  耦合图由 Explore 走查（substrate/cloud-sync/crypto-container/move-aside/mocks）。
+  生成 2026-06-21。本报告只提候选与切序，不提具体接口——选定后进 grilling 再设计接口。
+</footer>
+
+</body>
+</html>
