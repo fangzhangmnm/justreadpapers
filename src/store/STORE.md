@@ -27,7 +27,8 @@ import { createStore, createOneDriveProvider } from "./store/index.ts";
 const { provider } = createOneDriveProvider({ clientId, msalUrl: "./vendor/msal/msal-browser.min.js" });
 
 const store = createStore({
-  provider,                                  // 必填
+  provider,                                  // 必填：云端低层（OneDrive / mock provider）
+  ui,                                        // 必填：UI 回调 bundle，store 在决策点回调进来（见 §7）
   syncedSettingsFileName: "settings.json",   // 选填：要跨设备同步设置时给（§4）
   encryptionSaltFileName: "vault.salt",      // 选填：用「库统一密钥」加密时给（§5）
 });
@@ -131,7 +132,7 @@ const store = createStore({ provider, encryptionSaltFileName: "vault.salt" });
 // 首次建库密钥（salt 文件还不存在时，一次）：
 await store.encryption.init(password);   // 写 salt + 验证器到 vault.salt
 
-// 每次启动解锁（app UI 在 busy 遮罩之外做）：
+// 解锁（可选，做"启动时先解锁"UX）。也可以不调——首次用到加密文件时 store 会自己 ui.askPassword：
 const ok = await store.encryption.unlock(password);  // 验 salt → true/false；对则内存持 key
 store.encryption.isUnlocked();           // 库是否已解锁
 store.encryption.lock();                 // 清内存 key
@@ -142,10 +143,10 @@ store.encryption.lock();                 // 清内存 key
 ### 5.2 标记文件加密
 
 ```ts
-// (a) 库统一密钥：解锁一次(§5.1)，之后 save/open 透明加解密
+// (a) 库统一密钥：save/open 透明加解密；未解锁时 store 自己调 ui.askPassword 取密码（§7），不用你 catch
 const f = store.file("secret.ora", { isZip: true, encrypted: true });
-await f.save(bytes);   // 已解锁 → 库自动加密
-await f.open();        // 已解锁 → 自动解密
+await f.save(bytes);   // 已解锁 → 自动加密；未解锁 → store 驱动取密码 → 加密
+await f.open();        // 已解锁 → 自动解密；未解锁 → store 驱动取密码 → 解密
 
 // (b) 每文件独立密码：用到的那一刻显式传 pw（无 callback、无闭包留密码）
 const g = store.file("x.ora", { isZip: true });
@@ -171,13 +172,41 @@ push-serialize（每文件串行推）· If-Match（每次写带 etag，412 → 
 
 ---
 
-## 7. store 怎么对 UI 有强制性
+## 7. store 怎么对 UI 有强制性（Model B）
 
-> ⚠**评审中（Model B）**：UI 强制的**机制**（store 驱动 flow + 注入 `ui` 回调：`busy`/`askPassword`/`resolveConflict`/`reportError`，store 在决策点回调进 app 并 await）正在 grill，待定稿后补全本节 + config 的 `ui` 注入 + 冲突选项后果表。下面先列已确定的"形状强制"。
+store **不画像素**（无 DOM、无 `alert/confirm`），但它**驱动整个 flow**，在每个决策点**回调进你注入的 `ui` 并 await**——你不处理，flow 就过不去。这就是强制力：不是 store 替你画对话框，是**没解决就完不成这次写**。
 
-已确定的"形状强制"——很多 API 形状**逼你把对应 UI 做对**：
-- `setPreview` 只在 `ZipFile` 上 → 逼你想清楚文件是不是 zip 格式。
-- `get` 不给 default → 逼你把默认值收到一处。
+### 必填注入 `ui`（store 在这些时机回调进来）
+```ts
+const ui = {
+  // 危险写操作的锁屏遮罩：store 把每个写裹进来。你画一个吞输入的全屏遮罩即可。
+  busy: <T>(label: string, fn: () => Promise<T>) => Promise<T>,
+  // 需要密码时 store 调它；返回 pw 或 null(取消)。store 内部验，错了再调，直到对/取消。
+  askPassword: (ctx: { name: string; reason: "open" | "save" | "unlock" }) => Promise<string | null>,
+  // push 撞冲突时 store 调它；返回有限选项之一，后果由 store 执行(见下表)。
+  resolveConflict: (ctx: { name: string; local: Blob; cloud: Blob }) => Promise<ConflictChoice>,
+  // 非阻断错误(网络/文件不存在/字节非法)：store 调它弹 error banner。
+  reportError: (err: StoreError) => void,
+};
+```
+
+### 冲突的有限选项 + 后果（store 执行，app 只渲染那几个按钮）
+| `ConflictChoice` | store 做什么 |
+|---|---|
+| `"keepMine"` | 备份云端副本到 `.backup` → 用本地快照 weak-override 云端 → 采纳新 etag |
+| `"takeCloud"` | 备份本地 → 拉云端覆盖本地缓存 → 采纳云端 etag |
+| `"cancel"` | 什么都不动；本地保持脏，下个周期再试 |
+
+### store 编排的两条硬律（Model B 的代价 = 它的卖点）
+1. **先退 busy 遮罩、再弹 modal**：store 调 `askPassword`/`resolveConflict` 前先退出 busy 遮罩，否则遮罩盖住对话框 = 死锁（WebPaint 踩过）。这套交错归 store 管、一次做对。
+2. **await 期间 push-lock 安全**：flow 卡在回调 await 上时，同文件后续 push 排队、不死锁、不丢。
+
+### 原子性不变量（#76）
+flow 的原子单位是「进入 flow 那刻抓的**不可变快照**」，不是 wall-clock。store **永不回写 app 的活动状态**；回调 await 期间 app 的 mutation 归**下一个 dirty 周期**的新快照，绝不塞进正在飞的 flow。（外部如云端 API 的并发不在此保证内。）
+
+### 另外的"形状强制"
+- `setPreview` 只在 `ZipFile` 上 → 逼你想清文件是不是 zip。
+- `get` 不给 default → 逼你把默认值收一处。
 - `removeEncryption` 命名自带危险警告。
 
 **觉得某个 API 不该这样、想绕：停下 escalate to human。** 大概率它那样是为守某条红线。
