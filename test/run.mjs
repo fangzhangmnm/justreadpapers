@@ -4,6 +4,7 @@ import "./valuable-save.test.ts";
 import "./doc-id.test.ts";
 import "./viewer-geometry.test.ts";
 import "./catalog.test.ts";
+import "./local-head.test.ts";
 import "./collection.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
