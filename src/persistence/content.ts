@@ -2,7 +2,7 @@
 // PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
 // 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
 
-import type { Bytes, Store, EvictResult } from "../store/index.ts";
+import type { Bytes, Store, OffloadResult } from "../store/index.ts";
 
 export interface PaperFile {
   path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"
@@ -27,13 +27,12 @@ export interface Content {
   purge(cloudId: string, confirm: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>): Promise<void>;
   /** 清空回收站（本地+云端）。 */
   emptyTrash(): Promise<{ purged: number; failed: unknown[] }>;
-  /** 缓存到本地常驻（pin + 确保已缓存，离线可读）。 */
-  cache(path: string): Promise<void>;
-  /** 取消缓存（unpin + 守卫式 evict；dirty/离线/云端没了会保留）。 */
-  uncache(path: string): Promise<EvictResult>;
-  isPinned(path: string): boolean;
-  /** 已缓存的应用文件路径集合（gallery 批量判 cached）。 */
-  cachedKeys(): Promise<Set<string>>;
+  /** 留一份离线副本（确保已缓存，离线可读）。 */
+  keepOffline(path: string): Promise<void>;
+  /** 移除本地副本（守卫式 offload；dirty/离线/云端没了会保留）。 */
+  offload(path: string): Promise<OffloadResult>;
+  /** 已留作离线（=有本地副本）的应用文件路径集合（gallery 批量判）。 */
+  keptOfflineKeys(): Promise<Set<string>>;
   /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */
   read(path: string): Promise<Blob | null>;
   /** 摄入：上传 PDF（新文件；store 红线 never-overwrite）。 */
@@ -85,9 +84,8 @@ export function createContent(store: ContentStore): Content {
     async restore(cloudId, targetPath) { await store.restore({ fromCloud: true, cloudItemId: cloudId, targetName: targetPath }); },
     async purge(cloudId, confirm) { await store.purge({ cloudItemId: cloudId, confirm }); },
     async emptyTrash() { const r = await store.emptyTrash({ scope: "both" }); return { purged: r.purged ?? 0, failed: r.failed ?? [] }; },
-    async cache(path) { await raw(path).pin(); },
-    async uncache(path) { raw(path).unpin(); return raw(path).evict({ force: true }); },
-    isPinned: (path) => raw(path).isPinned(),
-    async cachedKeys() { return new Set(await store.localKeys()); },
+    async keepOffline(path) { await raw(path).keepOffline(); },
+    offload(path) { return raw(path).offload(); },
+    async keptOfflineKeys() { return new Set(await store.localKeys()); },
   };
 }

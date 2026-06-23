@@ -104,8 +104,8 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
           .filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length)).filter((p) => p.length > 0);
         const catMap = new Map<string, CatalogMeta>();
         for (const d of catalog.list()) catMap.set(d.fileName, { docId: d.id, name: d.fileName, title: d.title });
-        const cached = await content.cachedKeys().catch(() => new Set<string>());
-        const items = buildItems(files, catMap, (p) => cached.has(p), (p) => content.isPinned(p));
+        const kept = await content.keptOfflineKeys().catch(() => new Set<string>());
+        const items = buildItems(files, catMap, (p) => kept.has(p));
         return { items, folders, complete: tree.complete };
       } catch {
         return { items: [], folders: [], complete: false };

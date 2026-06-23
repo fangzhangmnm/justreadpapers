@@ -6,7 +6,7 @@
 export { createStore } from "./create-store.ts";
 export type { StoreConfig, StoreUI, RawFile, ZipFile, Store } from "./create-store.ts";
 export type { Bytes } from "./types.ts";   // 字节别名（host adapter 的类型用；不暴露内部文件路径）
-export type { EvictResult } from "./evict.ts";
+export type { OffloadResult } from "./offload.ts";
 export type { Collection, CollectionItem } from "./collection.ts";
 export type { LocalSettings, SyncedSettings } from "./settings.ts";
 // 本地缓存 adapter（host 装配 createStore 时注入 local 用；prod=idb）。

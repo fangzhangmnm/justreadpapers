@@ -14,8 +14,7 @@ import { createFreshness } from "./freshness.ts";
 import { createDelete } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
-import { createPinSet } from "./pin-set.ts";
-import { createEvict, type EvictResult } from "./evict.ts";
+import { createOffload, type OffloadResult } from "./offload.ts";
 import { createCollection, type Collection } from "./collection.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -40,7 +39,8 @@ export interface StoreConfig {
   local?: LocalCache;
   getPassword?: (name: string) => string | null;   // 非交互密码源（加密用；默认 null=不解锁）
   validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
-  isOnline?: () => boolean;                          // evict 离线守卫（默认 navigator.onLine）
+  isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
+  keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开不留本地)⚠TODO 未实现
 }
 
 // ── 文件对象（STORE.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
@@ -50,12 +50,10 @@ export interface RawFile {
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
   isDirty(): boolean;
-  // ── 缓存生命周期（pin/evict；红线守卫在 evict 深模块）──
-  isCached(): Promise<boolean>;
-  isPinned(): boolean;
-  pin(): Promise<void>;                         // 标 pin（离线常驻）+ 确保已缓存
-  unpin(): void;                                // 仅清 pin（不驱逐）
-  evict(opts?: { force?: boolean }): Promise<EvictResult>;   // 守卫式取消缓存（clean∧在线∧云端在∧!pinned）
+  // ── 离线副本（keepOffline/offload；无 LRU、无 pin flag：有本地副本 = kept offline）──
+  isKeptOffline(): Promise<boolean>;            // 本地有副本？（= 已留作离线）
+  keepOffline(): Promise<void>;                 // 留一份离线副本（未缓存则 acquire）。注：open 已含下载子过程，故名 keepOffline 非 download
+  offload(): Promise<OffloadResult>;            // 守卫式移除本地副本（clean∧在线∧云端有→移除；dirty/离线/cloud-gone→保留）
 }
 export interface ZipFile extends RawFile {
   setPreview(previewBlob: Blob): Promise<void>;
@@ -69,7 +67,8 @@ function localStorageKv(): Kv {
 }
 
 export function createStore(config: StoreConfig) {
-  const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), getPassword = () => null, validateAdopt } = config;
+  const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), getPassword = () => null, validateAdopt, keepOnOpen = true } = config;
+  if (!keepOnOpen) throw new Error("createStore: keepOnOpen:false（过路/流式 open，开不留本地）⚠TODO 未实现（STORE.md §2，待 range/streaming 接入）");
   const local = config.local ?? createLocalCache();   // prod=idb；测试注入 mock-local
   const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
 
@@ -77,8 +76,7 @@ export function createStore(config: StoreConfig) {
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
-  const pins = createPinSet(kv);
-  const evictMod = createEvict({ cloud, local, head, pins, isOnline });
+  const offloadMod = createOffload({ cloud, local, head, isOnline });
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
@@ -153,14 +151,11 @@ export function createStore(config: StoreConfig) {
       async rename(newName) { await renameSF(name, newName); },
       async delete() { await delSF(name); },
       isDirty() { return head.isDirty(name); },
-      isCached() { return local.exists(name); },
-      isPinned() { return pins.has(name); },
-      async pin() {   // 标 pin + 确保缓存（未缓存则 acquire；离线/失败 best-effort，pin 仍记下）
-        pins.add(name);
+      isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
+      async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
         if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError?.(e); } }
       },
-      unpin() { pins.remove(name); },
-      evict(opts) { return evictMod.evict(name, opts); },
+      offload() { return offloadMod.offload(name); },
     };
   }
 

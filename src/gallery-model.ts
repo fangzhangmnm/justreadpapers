@@ -19,18 +19,16 @@ export interface GalleryItem {
   path: string;       // approot 完整路径(content 操作用),如 "papers/Wei 2011.pdf"
   title: string;      // 展示标题(catalog 有则用,否则 basename 去 .pdf)
   docId?: string;     // catalog 身份(有 = 记过阅读位置)
-  cached?: boolean;   // 本地是否已缓存(离线可读)
-  pinned?: boolean;   // 是否 pin(离线常驻,不被驱逐)
+  keptOffline?: boolean;   // 本地有副本(已留作离线/离线可读)。无 LRU、无独立 pin → 单一态
 }
 export interface CatalogMeta { docId: string; name: string; title?: string; }   // name = 相对 papers 根的路径
 
 // 云 PDF 文件(已剥 papers/ 前缀的 {name,path})⊕ catalog → items(标题/docId 来自 catalog,按相对路径配——
-// 不用 basename,否则不同文件夹同名会撞)。cached/pinned 由 host 注入判定函数。
+// 不用 basename,否则不同文件夹同名会撞)。keptOffline 由 host 注入判定函数。
 export function buildItems(
   files: { name: string; path: string }[],
   catalogByName: Map<string, CatalogMeta>,
-  isCached?: (path: string) => boolean,
-  isPinned?: (path: string) => boolean,
+  isKeptOffline?: (path: string) => boolean,
 ): GalleryItem[] {
   return files.map((f) => {
     const meta = catalogByName.get(f.name);
@@ -39,8 +37,7 @@ export function buildItems(
       path: f.path,
       title: meta?.title || pathBasename(f.name).replace(/\.pdf$/i, ""),
       docId: meta?.docId,
-      cached: isCached ? isCached(f.path) : false,
-      pinned: isPinned ? isPinned(f.path) : false,
+      keptOffline: isKeptOffline ? isKeptOffline(f.path) : false,
     };
   });
 }

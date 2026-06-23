@@ -15,7 +15,7 @@ import "./trash.test.ts";
 import "./create-store.test.ts";
 import "./collection.test.ts";
 import "./collection-cache.test.ts";
-import "./evict.test.ts";
+import "./offload.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
 import { run } from "./_harness.ts";

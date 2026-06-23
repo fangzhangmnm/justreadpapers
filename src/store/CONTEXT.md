@@ -29,8 +29,28 @@
 2. **绝不让脏字节进 merge**（captive-portal HTML / 截断）。
 3. **freshness / 别读陈旧**（较低，但**是 JRP 的命**："各端接着读"=新设备一开就要最新）——seenBase 回退服务这条。
 
-## 相邻模块（已抽 / 待抽）
+## 相邻模块（深模块现状）
 
-- **substrate**（已抽）：编辑游标 + push-serialize（serialize/serialize2）+ save 合流。local-head 与它并列为两根有状态脊椎。
+- **substrate**：编辑游标 + push-serialize（serialize/serialize2）+ save 合流。local-head 与它并列为两根有状态脊椎。
 - **cloud-sync**：CloudSync 层，拥 kv 持久 etag + 云操作（push/pull/fetchMeta/trash/…）。
-- 待抽深模块：**seal**（加密透明）· **safe-resolve**（永不丢字节）· **push** · **freshness** · **delete** · **identity** · **trash**（见架构报告）。
+- 已抽并由 `create-store.ts` 组合：**seal**（加密透明）· **safe-resolve**（永不丢字节）· **push** · **freshness** · **delete** · **identity** · **trash** · **local-head** · **offload**（本地副本去留守卫）· **collection**。
+
+## 离线副本 —— keepOffline / offload（无 LRU、无 pin）
+
+> 本地副本的语义收敛成**一个 bit：在本地 / 不在本地**（= kept offline / 不）。LRU 已废弃 → 没有「受保护 vs 可驱逐」两层 → "pin" 这词没有指称对象，整套 pin/unpin/evict/force 坍缩成两个动词。
+
+- **keepOffline** — 确保本地有一份副本（未缓存则 acquire）。`keepOnOpen:true` 下开即等价自动 keepOffline。**不叫 download**：`open` 内部已含下载子过程，叫 download 会误导。
+- **offload** — 移除本地副本（≠ delete，云端不动）。**红线守卫全在 `offload` 深模块一处**：只 `clean ∧ 在线 ∧ 已登录 ∧ 云端有完整副本` 才移除；dirty / 离线 / 未登录 / cloud-gone 一律保留（那时本地是唯一好副本）。offload 永远是用户显式动作（无自动 LRU），故无 pin-protection 这一档。
+- **keepOnOpen**（store ctor）— 消费模式。`true`=读者/编辑器（JRP/JRB/WebPaint…），开即留本地；`false`=流式/过路消费（RealHome/Background Radio），开不留本地、只显式 keepOffline 才落地（⚠TODO 未实现，连 §2 range/streaming 一起设计）。
+
+## 反-duplicate 不变量（本库存在的唯一意义 = AI 不得绕）
+
+> **本地副本的存在与去留 = store 独占职责。** app 唯一接口是 `file.keepOffline / offload / isKeptOffline` + `store.localKeys`。app 端**拿不到** etag / dirty / online / 云端有没有——这些 truth 全在库里。
+
+故 app 层出现任何回答「**什么在本地 / 要不要留 / 能不能安全删 / 容量 / LRU / frecency / 陈旧锁 / cloud-gone 收敛**」的逻辑 = **duplicate，必删**（它结构上喂不到输入，是死代码）。adapt 旧 app（如 WebPaint）回本库时跑 leak-test：
+
+```
+grep -rnE 'evict|offload|LRU|frecency|cacheCap|ensureRoom|storage\.estimate|reconcileCloudGone|idleLock|什么在本地' <store/ 之外的 app 层>
+```
+
+store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-state.ts` 驱逐守卫 / `app-store.ts` cloud-gone 收敛 / `cloud-freshness.ts` 陈旧锁——吸进库后旧码喂不到输入、自然枯死）。

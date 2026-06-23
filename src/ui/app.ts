@@ -76,15 +76,15 @@ export const App = defineComponent({
         if (p.item.docId) persistence().catalog.upsert(p.item.docId, { fileName: rel });
       }, "已移动", "移动失败(同名?)");
     }
-    function onGalCache(it: GalleryItem): void {
-      void withGalleryBusy(() => persistence().content.cache(it.path), "已缓存到本地", "缓存失败(未登录/离线?)");
+    function onGalKeepOffline(it: GalleryItem): void {
+      void withGalleryBusy(() => persistence().content.keepOffline(it.path), "已下载到本地", "下载失败(未登录/离线?)");
     }
-    function onGalUncache(it: GalleryItem): void {
+    function onGalOffload(it: GalleryItem): void {
       void withGalleryBusy(async () => {
-        const r = await persistence().content.uncache(it.path);
-        showToast(r.status === "evicted" ? "已取消缓存"
+        const r = await persistence().content.offload(it.path);
+        showToast(r.status === "offloaded" ? "已移除本地缓存"
           : (({ dirty: "有未保存改动，已保留", offline: "离线，已保留", "cloud-gone": "云端无副本，已保留" } as Record<string, string>)[r.reason || ""] || "已保留"));
-      }, "", "取消缓存失败");
+      }, "", "移除缓存失败");
     }
     function onGalRestore(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {
       void withGalleryBusy(async () => { await persistence().content.restore(e.cloudId, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadBin(e.kind); }, "已恢复", "恢复失败");
@@ -231,7 +231,7 @@ export const App = defineComponent({
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
-      onGalLoadBin, onGalMove, onGalCache, onGalUncache, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
+      onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -275,7 +275,7 @@ export const App = defineComponent({
       <div class="jrp-body">
         <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount" :trash="galTrash" :backup="galBackup"
           @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery" @loadbin="onGalLoadBin"
-          @rename="onGalRename" @move="onGalMove" @trash="onGalTrash" @cache="onGalCache" @uncache="onGalUncache" @restore="onGalRestore" @purge="onGalPurge" @emptytrash="onGalEmptyTrash"
+          @rename="onGalRename" @move="onGalMove" @trash="onGalTrash" @keepoffline="onGalKeepOffline" @offload="onGalOffload" @restore="onGalRestore" @purge="onGalPurge" @emptytrash="onGalEmptyTrash"
           @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
           @signin="onGalSignin" @signout="onGalSignout" />
         <aside class="jrp-outline" v-if="outlineOpen">
