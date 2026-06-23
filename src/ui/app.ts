@@ -139,6 +139,7 @@ export const App = defineComponent({
       screenshot: (): void => menuRun(() => v()?.screenshot()),
       copyText: (): void => menuRun(() => v()?.copyText()),
       saveNow: (): void => menuRun(() => { void saveNow(); }),
+      overview: (): void => menuRun(() => v()?.toggleOverview()),
     };
   },
   template: `
@@ -175,6 +176,7 @@ export const App = defineComponent({
             <button @click="zoomOut">−</button><button @click="fitWidth">适配</button><button @click="zoomIn">＋</button>
           </div>
           <button class="jrp-menu-item" @click="toggleSpread">{{ spread ? '切单页' : '切双页' }}</button>
+          <button class="jrp-menu-item" @click="overview">页面总览</button>
           <button class="jrp-menu-item" @click="saveNow">保存阅读位置 · Ctrl+S</button>
           <button class="jrp-menu-item" @click="screenshot">截图当前页</button>
           <button class="jrp-menu-item" @click="copyText">复制当前页文本</button>

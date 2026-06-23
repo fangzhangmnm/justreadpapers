@@ -35,9 +35,16 @@ export const Viewer = defineComponent({
   emits: ["position", "page", "spread", "toast", "outline"],
   setup(_props: unknown, ctx: SetupCtx) {
     const containerRef = ref<HTMLElement | null>(null);
+    const thumbRef = ref<HTMLElement | null>(null);
     let lib: any = null, ns: any = null, viewer: any = null, eventBus: any = null, linkService: any = null, pdf: any = null;
     let restorePos: Position | null = null;
     let reporting = false;
+    // 页面总览(缩略图)—— pdf.js 不暴露 PDFThumbnailViewer,自己 roll:CSS Grid 占位卡 +
+    // IntersectionObserver 进可见区才渲染那一页小 canvas(200 页论文也只渲 ~可视+预取)。命令式 island,不进 reactive。
+    let overviewOn = false;
+    let overviewIO: IntersectionObserver | null = null;
+    const overviewRendered = new Set<number>();
+    let overviewBuiltForPdf: any = null;   // 换论文要重建骨架
     // 加载门:setDocument→restore 完成前,pdf.js 布局把 scrollTop 摆在 0,
     // 这些瞬态 scroll 绝不能 emit position(否则覆写 catalog 已存位置 → 续读丢失,"await default 0 覆盖"老坑)。
     let loading = false;
@@ -107,8 +114,92 @@ export const Viewer = defineComponent({
       if (keep) requestAnimationFrame(() => restore(keep));
     }
 
+    // ── 页面总览(缩略图概览)island ──────────────────────────────────────────
+    function grid(): HTMLElement | null { return thumbRef.value?.querySelector(".jrp-thumbs-grid") ?? null; }
+    function clearOverview(): void {
+      if (overviewIO) { overviewIO.disconnect(); overviewIO = null; }
+      const g = grid(); if (g) g.innerHTML = "";
+      overviewRendered.clear();
+      overviewBuiltForPdf = null;
+    }
+    function buildSkeleton(): void {
+      clearOverview();
+      const g = grid(); if (!g || !pdf) return;
+      const np = pdf.numPages as number;
+      const frag = document.createDocumentFragment();
+      for (let i = 1; i <= np; i++) {
+        const card = document.createElement("div");
+        card.className = "jrp-thumb-card";
+        card.dataset.page = String(i);
+        // canvas-wrap 用 A4 aspect-ratio 占位撑高度 → 空骨架不会一次性全 intersect 把整本渲染了。
+        card.innerHTML = `<div class="jrp-thumb-wrap"></div><div class="jrp-thumb-label">${i}</div>`;
+        card.addEventListener("click", () => { goToPage(i); setOverview(false); });
+        frag.appendChild(card);
+      }
+      g.appendChild(frag);
+      overviewBuiltForPdf = pdf;
+    }
+    function attachObserver(): void {
+      const g = grid(); if (!g) return;
+      if (overviewIO) overviewIO.disconnect();
+      overviewIO = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const card = e.target as HTMLElement;
+          const pn = parseInt(card.dataset.page || "", 10);
+          if (!pn || overviewRendered.has(pn)) continue;
+          overviewRendered.add(pn);
+          void renderThumb(card, pn).catch(() => { overviewRendered.delete(pn); });
+        }
+      }, { root: g, rootMargin: "400px" });
+      g.querySelectorAll(".jrp-thumb-card").forEach((c) => overviewIO!.observe(c));
+    }
+    async function renderThumb(card: HTMLElement, pn: number): Promise<void> {
+      const myPdf = pdf; if (!myPdf) return;
+      const page = await myPdf.getPage(pn);
+      if (myPdf !== pdf) return;                       // 渲染中换了论文 → 丢弃
+      const wrap = card.querySelector(".jrp-thumb-wrap") as HTMLElement | null; if (!wrap) return;
+      const cssW = wrap.clientWidth || 180;
+      const vp1 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: cssW / vp1.width });
+      const canvas = document.createElement("canvas");
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);   // cap 2:避免 200 页 ×4x 内存爆
+      canvas.width = Math.round(vp.width * dpr);
+      canvas.height = Math.round(vp.height * dpr);
+      const cx = canvas.getContext("2d"); if (!cx) return;
+      cx.scale(dpr, dpr);
+      await page.render({ canvasContext: cx, viewport: vp }).promise;
+      if (myPdf !== pdf || !card.isConnected) return;          // 渲染完又变了 → 丢弃
+      wrap.innerHTML = ""; wrap.appendChild(canvas);
+    }
+    function markCurrent(): void {
+      const g = grid(); if (!g || !viewer) return;
+      g.querySelectorAll(".jrp-thumb-card.current").forEach((el) => el.classList.remove("current"));
+      const node = g.querySelector(`.jrp-thumb-card[data-page="${viewer.currentPageNumber}"]`);
+      if (node) node.classList.add("current");
+    }
+    function setOverview(visible: boolean): void {
+      const root = thumbRef.value; if (!root || !pdf) return;
+      const want = !!visible;
+      if (want === overviewOn) return;
+      overviewOn = want;
+      if (overviewOn) {
+        if (overviewBuiltForPdf !== pdf) buildSkeleton();
+        root.classList.remove("hidden");
+        attachObserver();
+        markCurrent();
+        const cur = viewer.currentPageNumber || 1;
+        requestAnimationFrame(() => grid()?.querySelector(`.jrp-thumb-card[data-page="${cur}"]`)?.scrollIntoView({ block: "center" }));
+      } else {
+        root.classList.add("hidden");
+        if (overviewIO) { overviewIO.disconnect(); overviewIO = null; }
+      }
+    }
+    function goToPage(n: number): void { if (viewer) viewer.currentPageNumber = n; }
+
     async function loadBlob(blob: Blob, opts?: { key?: string; pos?: Position | null }): Promise<void> {
       if (!viewer || !lib) return;
+      setOverview(false); clearOverview();   // 换论文:关总览 + 弃旧骨架(下次开时按新 pdf 重建)
       loading = true;                 // 关门:布局期的 page0 瞬态 scroll 不入 record(restore 完成才开门)
       currentKey = opts?.key || "anon";
       restorePos = opts?.pos ?? null;
@@ -148,11 +239,13 @@ export const Viewer = defineComponent({
       eventBus.on("pagechanging", () => emitPage());
       c.addEventListener("scroll", onScroll, { passive: true });
       c.addEventListener("wheel", onWheel, { passive: false });
+      thumbRef.value?.querySelector("[data-thumb-close]")?.addEventListener("click", () => setOverview(false));
     });
     onUnmounted(() => {
       const c = containerRef.value;
       c?.removeEventListener("scroll", onScroll);
       c?.removeEventListener("wheel", onWheel);
+      if (overviewIO) { overviewIO.disconnect(); overviewIO = null; }
     });
 
     // Quest 核心:截当前页 canvas → 剪贴板 PNG(拿去问 AI)。
@@ -195,8 +288,15 @@ export const Viewer = defineComponent({
         ctx.emit("spread", spreadMode);
         void applyFit().then(() => { if (keep) restore(keep); });
       },
+      toggleOverview: (): void => { if (pdf) setOverview(!overviewOn); else ctx.emit("toast", "先打开一篇论文"); },
     });
-    return { containerRef };
+    return { containerRef, thumbRef };
   },
-  template: `<div ref="containerRef" class="jrp-viewer"><div class="pdfViewer"></div></div>`,
+  template: `<div class="jrp-viewer-root">
+    <div ref="containerRef" class="jrp-viewer"><div class="pdfViewer"></div></div>
+    <div ref="thumbRef" class="jrp-thumbs hidden">
+      <div class="jrp-thumbs-bar"><button class="jrp-btn" data-thumb-close>关闭总览</button><span class="jrp-thumbs-title">页面总览</span></div>
+      <div class="jrp-thumbs-grid"></div>
+    </div>
+  </div>`,
 });
