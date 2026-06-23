@@ -22,8 +22,8 @@
 | **P1.5 部署骨架** | ✅ | vendor Vue 3.5.35 + greenfield Vue app + PWA shell（`pwa-shell.ts` + 4 路更新检测）+ dev/prod 分离（`main→/dev/`）。 |
 | **P2 持久化 + resume** | ✅ | `persistence/{index,catalog,content}` 三面 + resume 循环（内联，无独立 `resume.ts`）+ session-save/jumpscare 已修好。**现已全走 createStore 唯一入口**（见下）。 |
 | **★ store 大改（计划外 detour）** | ✅ | 见下节。 |
-| **P3 UI（Vue）** | 🟡 **部分** | ✅ `ui/viewer.ts`（pdf.js imperative island，主表面）· `ui/gallery.ts`（文件面板 + sliceFolder）· `ui/app.ts`（shell + ☰ 汉堡菜单 + outline + jumpscare）· `app-state.ts`（reactive SSoT）。**欠**：folder-tree 深模块 paradigm、thumbnails 总览、quest（截图→剪贴板）、reading-controls（zoom/spread/theme）独立化、status-line、toasts（更新/冲突/idle）。 |
-| **P4 ingest** | ❌ **未做** | 无 `ingest.ts`。本地上传 PDF / 下载（URL）/ arxiv+proxy 都没建。 |
+| **P3 UI（Vue）** | 🟡 **大部** | ✅ viewer/gallery/app/app-state · quest 截图 · reading-controls(菜单内 zoom/spread/theme) · 人工 save(Ctrl+S) · status-line(保存状态指示) · toasts(更新 + store 错误 surface，统一全局通道 `pushToast`)。**仍欠**：folder-tree 深模块 paradigm(跨 sibling 设计件，需设计决策)、thumbnails 总览。 |
+| **P4 ingest（本地上传）** | ✅ | gallery crumbs「＋传」多选上传到当前文件夹 → `content.upload`(store.file.save never-overwrite)，同名/失败逐条 toast。下载(URL/arxiv) 仍 parked(见下)。 |
 
 ---
 
@@ -39,11 +39,19 @@
 
 ---
 
+## 续读修复 session —— 已完成（2026-06-22，`3a685fb` merge main + push dev，**未真机验**）
+
+user 真机测出"没续上上次页码"。**根因（user 钉的"await default 0 覆盖"老坑确认）**：viewer 加载期 pdf.js 把 `scrollTop` 摆 0，瞬态 scroll 在 restore 前 emit page0 → 覆写 catalog 已存位置（10s debounce 期间可被先 commit → 云端钉死 page0）。**修法**：viewer 加 `loading` 门，restore 完成（`pagesinit` 粗调 + `pagesloaded` 精修）前 `onScroll` 不 emit；加载失败也开门。
+连带交付：人工 save（菜单 + Ctrl/Cmd+S → `save.flush()`）· P4 本地上传 · P3 status-line（保存状态指示）+ store 错误 surface 成 toast + toast 全局通道 · 删菜单死按钮"离线缓存 G5"。门：tsc/lint/build/91 测全过。
+**真机待验**：①续读真的续上（开 PDF→读到中段→关→重开 jumpscare 回原位）②保存状态指示走字（未保存→保存中→已保存）③Ctrl+S 与菜单保存出 toast ④本地上传（＋传，含同名报错）⑤store 出错弹 toast 不吞。
+
+**⚠ keepalive 缺口（未修，属库内）**：pagehide/visibilitychange 的 `flushKeepalive` → `catalog.commitNow()` 是异步 PUT，浏览器关页时可能被杀 → 最后一刻位置仍可能丢。**真修要 store 的 graph fetch 带 `{keepalive:true}`，在库内 → 走 `pwa-cloud-store` + 改前 escalate**。当前用人工 save 兜底。
+
 ## 下个 session 的正题（优先序）
 
-1. **真机验 store 大改**（最高，是上条的门）。/dev/ 已部署。坏了先修引擎，再往下。
-2. **P4 ingest —— 本地上传**（PLAN §5 P4）：`ui` 入口 + `content.upload`（已就绪，走 `store.file.save`，never-overwrite 红线）。"接死按钮"修复也在这批。
-3. **P3 UI 补齐**：folder-tree 深模块（PLAN §2b "side-panel paradigm"，目标搬给 JRB/WebXiaoHeiWu）· thumbnails 总览 · quest 截图 · reading-controls · status/toasts。
+1. **真机验上面两个 session**（store 大改 + 续读修复）。/dev/ 已部署。坏了先修引擎，再往下。
+2. **P3 UI 补齐（剩余）**：folder-tree 深模块（PLAN §2b "side-panel paradigm"，目标搬给 JRB/WebXiaoHeiWu，**需 user 设计决策**别瞎猜）· thumbnails 总览。
+3. **keepalive 落盘可靠性**（见上 ⚠）：走 `pwa-cloud-store` 在库内给云 PUT 加 keepalive。
 4. **下载（URL/arxiv）= 重构跑通后的高优**（PLAN §6 parked，user 2026-06-20 钉死）：
    - 单一输入入口，app 自动判 arxiv vs 任意 PDF 链接；arxiv 多格式匹配（abs/pdf、export 子域、新式 `1102.5064v2`、老式 `hep-th/9901001`、带/不带版本）。
    - **需 CORS proxy**——**那时再建**，且守 anti-abandonware（ADR-0006）：proxy 挂了 app+数据仍完好，proxy 只是 autofill 便利。
