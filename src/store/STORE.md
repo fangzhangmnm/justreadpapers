@@ -14,6 +14,7 @@
 3. **缺接口、库没实现你要的行为 → escalate to human 改库 API。绝不在 app 端绕过库自己实现。**
 4. **不要 deep import 库内部文件**。只从 `index.ts` 拿 `createStore` + 一个 provider。内部文件顶部有 WARNING，构建 lint 会挡 deep import。
 5. **API 难用是故意的**（§7）。觉得别扭、想绕——**停下 escalate**，别绕。
+6. 对本库的修改，重构，API修改前，需要阅读`DATA SAFETY GUIDELINE.md`
 
 > 为什么这么严：这个库存在的**唯一意义**是把红线数据安全（不丢、不静默覆盖、离线可读、冲突 surface、加密）**一次在库里保证好，每个兄弟项目开箱即得**。你绕过去，库就失败了。
 
