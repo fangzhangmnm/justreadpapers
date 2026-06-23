@@ -90,6 +90,7 @@ export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalH
   function onPushed(name: string, newEtag: string | null, dirtyAfter: boolean): void {
     if (newEtag != null) _base.set(name, newEtag);        // 只推进自己的 base
     if (dirtyAfter) {
+      _setDirty(name, true);                              // 幂等：显式标脏（不依赖入场态，兼 heal 后路径）
       _parent.set(name, newEtag ?? null);                 // 剩余编辑派生自刚推上去的版本（B2 不丢编辑）
     } else {
       _setDirty(name, false);

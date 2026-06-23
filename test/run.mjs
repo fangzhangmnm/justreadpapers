@@ -7,6 +7,8 @@ import "./catalog.test.ts";
 import "./local-head.test.ts";
 import "./safe-resolve.test.ts";
 import "./seal.test.ts";
+import "./push.test.ts";
+import "./freshness.test.ts";
 import "./collection.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
