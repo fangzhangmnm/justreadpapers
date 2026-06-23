@@ -103,6 +103,27 @@ export function createStore(config: StoreConfig) {
   const identity = createIdentity({ cloud, local, head, doPush: pushMod.doPush, serialize: sub.serialize, serialize2: sub.serialize2, seal, busy: ui.busy });
   const trashMod = createTrash({ cloud, local, head, busy: ui.busy });
 
+  // ── 单飞守卫（port 自 WebPaint store.ts，2026-06-21 起红线）：用户态写流同一时刻只一个，
+  //   并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。与 ui.busy 正交、更硬
+  //   （busy 只是 UI 防误点、无 UI 时失效；这道库内自带，无头复用也挡得住）。同名字节竞争仍由
+  //   substrate.serialize2 兜底，这道在其上加「全局同一时刻只一个用户态写」的更强语义（user 明确要）。
+  //   安全前提：被守的流互不内部调用——saveAs/rename 内部走 doPush（非被守流）；del/restore/purge/
+  //   emptyTrash 直调 adapter；newFolder/deleteFolder 直调 cloud.*。新增被守流前先核这条，否则嵌套自锁。
+  let _userWriteInFlight: string | null = null;
+  function singleFlight<A extends unknown[], R>(label: string, fn: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
+    return (...a: A): Promise<R> => {
+      if (_userWriteInFlight) {
+        const e = new Error(`有另一项操作进行中（${_userWriteInFlight}），请等它完成再试`) as Error & { code?: string };
+        e.code = "STORE_BUSY";
+        return Promise.reject(e);
+      }
+      _userWriteInFlight = label;
+      return Promise.resolve().then(() => fn(...a)).finally(() => { _userWriteInFlight = null; });
+    };
+  }
+  const delSF = singleFlight("删除", (n: string) => del.del(n));
+  const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
+
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（默认 cancel=留 dirty）──
   const onConflict = async ({ name }: { name: string }): Promise<ResolveChoice> => {
     if (!ui.resolveConflict) return "cancel";
@@ -129,8 +150,8 @@ export function createStore(config: StoreConfig) {
         const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
         return await seal.unsealForRead(name, asBlob);
       },
-      async rename(newName) { await identity.rename(name, newName); },
-      async delete() { await del.del(name); },
+      async rename(newName) { await renameSF(name, newName); },
+      async delete() { await delSF(name); },
       isDirty() { return head.isDirty(name); },
       isCached() { return local.exists(name); },
       isPinned() { return pins.has(name); },
@@ -172,18 +193,18 @@ export function createStore(config: StoreConfig) {
     listAll: () => cloud.listAll(),
     // 文件夹操作（gallery folder-tree）：空文件夹增删走深模块（删除"必须空"在 cloud 内强制）。
     ensureFolder: (path: string) => cloud.ensureFolder(path),
-    newFolder: (path: string) => ui.busy("新建文件夹…", () => cloud.ensureFolder(path)),
-    deleteFolder: (path: string) => ui.busy("删除文件夹…", () => cloud.removeFolder(path)),
+    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", () => cloud.ensureFolder(path))),
+    deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", () => cloud.removeFolder(path))),
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
     listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）
     localKeys: () => local.appKeys(),     // 已缓存的应用文件名集合（gallery 批量判 cached）
-    restore: trashMod.restore,
-    purge: trashMod.purge,
-    emptyTrash: trashMod.emptyTrash,
-    saveAs: identity.saveAs,
+    restore: singleFlight("恢复", trashMod.restore),
+    purge: singleFlight("彻底删除", trashMod.purge),
+    emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),
+    saveAs: singleFlight("另存为", identity.saveAs),
     // 编辑游标（app 标脏入口经 file.save；此处暴露给需要的高级用法）。
     _internal: { head, cloud, sub },
   };

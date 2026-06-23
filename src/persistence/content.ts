@@ -2,8 +2,7 @@
 // PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
 // 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
 
-import type { Bytes } from "../store/types.ts";
-import type { Store, EvictResult } from "../store/index.ts";
+import type { Bytes, Store, EvictResult } from "../store/index.ts";
 
 export interface PaperFile {
   path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"

@@ -34,17 +34,26 @@ test("删除两端 dirty → demoted-local-only（脏字节本地保留）", asy
   assert(await local.exists("f"), "未推脏字节本地保留");
 });
 
-test("离线删除 → 本地 move-aside + 持久排队", async () => {
-  const { local, del } = rig();
-  await local.save("f", enc("X"));
+test("离线删除：已同步文件(base 已知)→ 本地 move-aside + 排队云删", async () => {
+  const { cloud, local, del } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("X"));   // 云端有 etag
   const r = await del("f", { isOnline: () => false });
-  eq(r.where, "local"); assert(r.queuedCloudDelete, "排队云删");
+  eq(r.where, "local"); assert(r.queuedCloudDelete, "有 base → 排云删");
+});
+
+test("离线删除：null base(本地 only/从未同步)不排云删（Finding 1，port 自 WebPaint）", async () => {
+  const { local, del } = rig();
+  await local.save("f", enc("X"));   // 只本地、从未推云 → baseEtag=null
+  const r = await del("f", { isOnline: () => false });
+  eq(r.where, "local"); assert(!r.queuedCloudDelete, "null base 不排云删（防重连盲删别设备同名新文件）");
 });
 
 test("replayDelete：base 匹配→trash / 不在→converged / 被改→edit-wins", async () => {
   const { cloud, replayDelete } = rig();
   await cloud.push("f", enc("X"));
   eq((await replayDelete("f", { baseEtag: cloud.getETag("f") })).status, "trashed", "匹配→删");
+  await cloud.push("n", enc("Z"));   // 另起未被消费的云端文件验 null base
+  eq((await replayDelete("n", { baseEtag: null })).status, "skipped-no-base", "无 base→不删（防删别设备同名新文件）");
   eq((await replayDelete("ghost", { baseEtag: "x" })).status, "converged", "不在→已没了");
   await cloud.push("g", enc("Y"));
   eq((await replayDelete("g", { baseEtag: "STALE" })).status, "conflict-edit-wins", "被改→不删");

@@ -47,8 +47,4 @@ export const idbCache = {
       t.onerror = (): void => reject(t.error);
     }));
   },
-  /** 复制(backup 用):源不存在则 noop。 */
-  copy(from: string, to: string): Promise<void> {
-    return this.get(from).then((r) => (r ? this.put(to, { ...r, updatedAt: Date.now() }) : undefined));
-  },
 };
