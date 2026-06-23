@@ -86,5 +86,7 @@ export function createPush(cfg: PushCfg) {
   function push(name: string, opts: PushOpts): Promise<PushResult> {
     return serialize(name, () => doPush(name, opts));
   }
-  return { push };
+  // doPush = 未串行版：给已在自己 serialize/serialize2 段内的调用方（identity 的 rename/saveAs），
+  //   避免同名嵌套 serialize 自锁。
+  return { push, doPush };
 }

@@ -1,0 +1,59 @@
+import { test, eq, assert } from "./_harness.ts";
+import { createMockProvider } from "../src/store/mock-provider.ts";
+import { createMockLocal } from "../src/store/mock-local.ts";
+import { createCloudSync, memKv } from "../src/store/cloud-sync.ts";
+import { createLocalHead } from "../src/store/local-head.ts";
+import { createDelete } from "../src/store/delete.ts";
+
+const enc = (s: string) => new TextEncoder().encode(s);
+
+function rig() {
+  const provider = createMockProvider();
+  const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n: string) => n });
+  const local = createMockLocal();
+  const head = createLocalHead({ kv: memKv(), getCloudEtag: (n: string) => cloud.getETag(n) });
+  const kv = memKv();
+  const d = createDelete({ cloud, local, head, kv });
+  return { cloud, local, head, kv, ...d };
+}
+
+test("删除两端 clean → 云端 .trash + 本地硬删（不留双份）", async () => {
+  const { cloud, local, del } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("X"));
+  const r = await del("f");
+  eq(r.where, "cloud", "where=cloud");
+  assert(!(await local.exists("f")), "干净副本硬删");
+});
+
+test("删除两端 dirty → demoted-local-only（脏字节本地保留）", async () => {
+  const { cloud, local, head, del } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("MINE"));
+  head.markSeen("f", cloud.getETag("f")); head.recordEdit("f");
+  const r = await del("f");
+  eq(r.status, "demoted-local-only", "降级 local-only");
+  assert(await local.exists("f"), "未推脏字节本地保留");
+});
+
+test("离线删除 → 本地 move-aside + 持久排队", async () => {
+  const { local, del } = rig();
+  await local.save("f", enc("X"));
+  const r = await del("f", { isOnline: () => false });
+  eq(r.where, "local"); assert(r.queuedCloudDelete, "排队云删");
+});
+
+test("replayDelete：base 匹配→trash / 不在→converged / 被改→edit-wins", async () => {
+  const { cloud, replayDelete } = rig();
+  await cloud.push("f", enc("X"));
+  eq((await replayDelete("f", { baseEtag: cloud.getETag("f") })).status, "trashed", "匹配→删");
+  eq((await replayDelete("ghost", { baseEtag: "x" })).status, "converged", "不在→已没了");
+  await cloud.push("g", enc("Y"));
+  eq((await replayDelete("g", { baseEtag: "STALE" })).status, "conflict-edit-wins", "被改→不删");
+});
+
+test("drainDeleteQueue：离线删入队 → 重连排空", async () => {
+  const { cloud, local, del, drainDeleteQueue } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("X"));
+  await del("f", { isOnline: () => false });        // 入队（baseEtag=云端当前）
+  const r = await drainDeleteQueue();
+  eq(r.drained, 1, "排空 1 条");
+});

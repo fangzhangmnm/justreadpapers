@@ -37,6 +37,7 @@ export interface LocalHead {
   markSeen(name: string, etag: string | null): void;     // 看到云版(open/refresh meta)：set _base；dirty 缺 parent(reload)→re-capture
   markSynced(name: string, etag: string | null): void;   // 采纳云版(pull/快进/acquire)：set _base + 清 dirty/parent（本地=云端）
   onPushed(name: string, newEtag: string | null, dirtyAfter: boolean): void;  // push 落地
+  forget(name: string): void;                            // 清掉该 name 的全部云端谱系（删除/降级 local-only）
 }
 
 export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalHeadCfg): LocalHead {
@@ -98,5 +99,12 @@ export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalH
     }
   }
 
-  return { ifMatchFor, seenBase, isDirty, recordEdit, markSeen, markSynced, onPushed };
+  function forget(name: string): void {
+    _base.delete(name);
+    _parent.delete(name);
+    _dirtyMem.delete(name);
+    kv.remove(dirtyKey(name));
+  }
+
+  return { ifMatchFor, seenBase, isDirty, recordEdit, markSeen, markSynced, onPushed, forget };
 }
