@@ -5,6 +5,12 @@
 > 状态：设计定稿 2026-06-21。行为以本文为准；本文与代码冲突 = 代码 bug，修代码对齐本文。
 > 标 ⚠TODO 的是已定、待实现。
 
+> **复用模型（2026-06-23 user 钉，覆盖旧 canonical/baked-copy 文档）**：本引擎**没有 canonical SSOT**——
+> `MyPWAPatterns/sync-store/` 只有 README、从未实现，那套"merge 回 canonical + 版本号"的 shared-lib-workflow 文档**已过时**。
+> 现行：**兄弟之间互相拷代码**（谁改好、稳了，别的兄弟把 diff 拷过去）。**本 STORE.md（随引擎一起拷）是这份引擎的唯一权威**，
+> PWAPattern 里的 store 文档以后也会腐烂、不要信。当前 JRP 的 `src/store/` 是最领先的 fork（含 `collection` 本地缓存）；
+> WebPaint 仍用旧 `folder-store`（collection 的旧名）+ 自管 IDB，日后迁 collection 时拷本 fork。
+
 ---
 
 ## 0. 铁律（用了本库就必须守）

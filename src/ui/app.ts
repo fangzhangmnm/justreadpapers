@@ -7,6 +7,7 @@ import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
 import { persistence, settings, appUi, pwaShell, pushToast } from "../app-state.ts";
 import { PAPERS_FOLDER } from "../config.ts";
+import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,6 +34,54 @@ export const App = defineComponent({
     const page = ref(0);
     const total = ref(0);
     const spread = ref(0);
+
+    // ── Gallery host：folder div 是窄接口展示组件，宿主在此喂数据 + 执行操作（碰 store）。──
+    const galItems = ref<GalleryItem[]>([]);
+    const galFolders = ref<string[]>([]);
+    const galLoading = ref(false);
+    const galSignedIn = ref(false);
+    async function refreshGallery(): Promise<void> {
+      if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
+      galLoading.value = true;
+      try { const g = await persistence().listGallery(); galItems.value = g.items; galFolders.value = g.folders; }
+      finally { galLoading.value = false; }
+    }
+    async function withGalleryBusy(fn: () => Promise<void>, okMsg: string, failMsg: string): Promise<void> {
+      galLoading.value = true;
+      try { await fn(); if (okMsg) showToast(okMsg); } catch { showToast(failMsg); } finally { await refreshGallery(); }
+    }
+    function onGalRename(p: { item: GalleryItem; name: string }): void {
+      const base = /\.pdf$/i.test(p.name) ? p.name : p.name + ".pdf";   // .pdf 是 JRP-specific，宿主补
+      const parent = pathFolder(p.item.path);
+      const newPath = parent ? `${parent}/${base}` : base;
+      if (newPath === p.item.path) return;
+      void withGalleryBusy(async () => {
+        await persistence().content.rename(p.item.path, newPath);
+        if (p.item.docId) persistence().catalog.upsert(p.item.docId, { fileName: newPath.slice(PAPERS_FOLDER.length + 1) });
+      }, "已改名", "改名失败");
+    }
+    function onGalTrash(it: GalleryItem): void {
+      void withGalleryBusy(async () => {
+        await persistence().content.trash(it.path);
+        if (it.docId) persistence().catalog.trash(it.docId);
+      }, "已移到回收站", "删除失败");
+    }
+    function onGalNewFolder(p: { parent: string; name: string }): void {
+      const rel = pathJoin(p.parent, p.name);
+      void withGalleryBusy(() => persistence().content.ensureFolder(`${PAPERS_FOLDER}/${rel}`), "已建文件夹", "建文件夹失败");
+    }
+    function onGalUpload(p: { folder: string; files: File[] }): void {
+      const base = p.folder ? `${PAPERS_FOLDER}/${p.folder}` : PAPERS_FOLDER;
+      void withGalleryBusy(async () => {
+        let ok = 0; const failed: string[] = [];
+        for (const f of p.files) {
+          const nm = f.name.replace(/[\\/:*?"<>|]/g, "").replace(/\.pdf$/i, "").trim() + ".pdf";
+          try { await persistence().content.upload(`${base}/${nm}`, f); ok++; } catch { failed.push(nm); }
+        }
+        if (!ok) throw new Error("none");
+        showToast(failed.length ? `上传 ${ok} 个，${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
+      }, "", "上传失败(同名/未登录/离线?)");
+    }
 
     const themeMode = ref(settings().get("theme") || "auto");
     function resolveTheme(m: string): string { return m === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day") : m; }
@@ -101,13 +150,18 @@ export const App = defineComponent({
         await persistence().catalog.init();
         jumpscare();
       }
-      auth.onAuthChanged((st: any) => { if (st && st.signedIn) void onSignedIn(); });
+      auth.onAuthChanged((st: any) => {
+        galSignedIn.value = !!(st && st.signedIn);
+        void refreshGallery();
+        if (st && st.signedIn) void onSignedIn();
+      });
       // 离线/未登录也从本地缓存 hydrate 续读（catalog.init 离线时 cloud sync 优雅失败，本地位置仍在）。
       async function resumeOffline(): Promise<void> {
         try { await persistence().catalog.init(); jumpscare(); } catch { galleryOpen.value = true; }
       }
       try {
         const st = await auth.initAuth();
+        galSignedIn.value = !!st.signedIn;
         if (st.signedIn) await onSignedIn(); else await resumeOffline();
       } catch { await resumeOffline(); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
@@ -124,6 +178,10 @@ export const App = defineComponent({
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
+      galItems, galFolders, galLoading, galSignedIn,
+      onGalRename, onGalTrash, onGalNewFolder, onGalUpload, refreshGallery,
+      onGalSignin: (): void => { void persistence().auth.signIn(); },
+      onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen, onLocalFile,
       onPos: (p: Position): void => { pos.value = p; if (currentDocId.value) persistence().recordPosition(currentDocId.value, p); },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
@@ -163,7 +221,10 @@ export const App = defineComponent({
         </button>
       </header>
       <div class="jrp-body">
-        <Gallery v-if="galleryOpen" @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" />
+        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading"
+          @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery"
+          @rename="onGalRename" @trash="onGalTrash" @newfolder="onGalNewFolder" @upload="onGalUpload"
+          @signin="onGalSignin" @signout="onGalSignout" />
         <aside class="jrp-outline" v-if="outlineOpen">
           <div class="jrp-ctrlbar">
             <button class="jrp-ctrl" @click="zoomOut" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="7.5" y1="11" x2="14.5" y2="11"/></svg></button>

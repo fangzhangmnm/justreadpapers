@@ -1,122 +1,78 @@
-// Gallery 文件 sidebar(深模块 paradigm)。自包含:用 persistence 单例,listGallery + sliceFolder 切层,
-// 直调 content/flow(不重复 cloud)。cloud header(登录/登出/状态)在 panel 内。emit open/toast 给 shell。
-// 3b:列表+导航+打开。3c:⋯菜单 改名/删除 + 新建文件夹(inline 输入,无 system dialog)。
+// Gallery —— 文件库**窄接口展示组件**(folder-tree paradigm,可复用 standalone div)。
+// 设计(2026-06-23 user 钉):一个独立 div,兄弟项目挂上去就能用。**零 store / 零 persistence / 零 app-specific 指令**。
+//   数据注入(props: items/folders/signedIn/loading)→ 组件内 sliceFolder 客户端切层 + 管 currentFolder/inline 编辑态。
+//   操作 emit 意图(open/rename/trash/newfolder/upload/signin/signout/refresh),宿主执行(碰 store)后回灌 props。
+// 导航 = 面包屑钻入式(全家共识,扁平路径+切片,零 tree-sync bug)。无 expand/collapse 树。
+// 滚动:.jrp-gallery 固定高 flex 列,唯一滚动体 = .jrp-gal-list(flex:1 overflow),head/crumbs 固定不 grow。
 import { defineComponent, ref, computed, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
-import { sliceFolder, breadcrumb, pathFolder } from "../gallery-model.ts";
+import { sliceFolder, breadcrumb, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
-import { persistence } from "../app-state.ts";
-import { PAPERS_FOLDER } from "../config.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface SetupCtx { emit: (e: string, payload?: unknown) => void; }
 
+// 通用文件名清洗(剥非法字符)——文件系统卫生,非 app-specific(扩展名/路径由宿主补)。
 function sanitizeName(s: string): string {
   return s.replace(/[\\/:*?"<>|]/g, "").replace(/^\.+/, "").replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
 export const Gallery = defineComponent({
   name: "Gallery",
-  emits: ["open", "close", "toast"],
-  setup(_props: unknown, ctx: SetupCtx) {
-    const items = ref<GalleryItem[]>([]);
-    const folders = ref<string[]>([]);
+  props: {
+    items: { type: Array, default: () => [] as GalleryItem[] },   // 全部 item(相对根路径);切片在组件内
+    folders: { type: Array, default: () => [] as string[] },       // 全部真文件夹(含空夹)=空夹单一真相源
+    signedIn: { type: Boolean, default: false },
+    loading: { type: Boolean, default: false },
+  },
+  emits: ["open", "close", "toast", "rename", "trash", "newfolder", "upload", "signin", "signout", "refresh"],
+  setup(props: any, ctx: SetupCtx) {
     const currentFolder = ref("");
-    const loading = ref(false);
-    const signedIn = ref(false);
     const menuFor = ref<string | null>(null);     // ⋯ 菜单开在哪个 item.path
     const editing = ref<string | null>(null);     // 哪个 item.path 在 inline 改名
     const editVal = ref("");
     const newFolderMode = ref(false);
     const newFolderVal = ref("");
 
-    const sliced = computed(() => sliceFolder(items.value, folders.value, currentFolder.value));
+    const sliced = computed(() => sliceFolder(props.items as GalleryItem[], props.folders as string[], currentFolder.value));
     const crumbs = computed(() => breadcrumb(currentFolder.value));
-    const content = (): any => persistence().content;
-    const catalog = (): any => persistence().catalog;
 
-    async function refresh(): Promise<void> {
-      menuFor.value = null;
-      if (!signedIn.value) { items.value = []; folders.value = []; return; }
-      loading.value = true;
-      try { const g = await persistence().listGallery(); items.value = g.items; folders.value = g.folders; }
-      finally { loading.value = false; }
-    }
     function go(path: string): void { currentFolder.value = path; menuFor.value = null; }
-    function enter(sub: string): void { currentFolder.value = currentFolder.value ? `${currentFolder.value}/${sub}` : sub; menuFor.value = null; }
+    function enter(sub: string): void { currentFolder.value = pathJoin(currentFolder.value, sub); menuFor.value = null; }
 
     function toggleMenu(it: GalleryItem): void { menuFor.value = menuFor.value === it.path ? null : it.path; }
     function startRename(it: GalleryItem): void { editing.value = it.path; editVal.value = it.title; menuFor.value = null; }
     function cancelRename(): void { editing.value = null; }
-    async function commitRename(it: GalleryItem): Promise<void> {
+    // 组件只清洗 + emit 意图(item + 干净显示名);扩展名/路径/store 由宿主处理(保持窄接口、零 app-specific)。
+    function commitRename(it: GalleryItem): void {
       if (editing.value !== it.path) return;
       editing.value = null;
       const clean = sanitizeName(editVal.value);
       if (!clean) return;
-      const base = /\.pdf$/i.test(clean) ? clean : clean + ".pdf";
-      const parent = pathFolder(it.path);
-      const newPath = parent ? `${parent}/${base}` : base;
-      if (newPath === it.path) return;
-      try {
-        await content().rename(it.path, newPath);
-        if (it.docId) catalog().upsert(it.docId, { fileName: newPath.slice(PAPERS_FOLDER.length + 1) });
-        ctx.emit("toast", "已改名");
-        await refresh();
-      } catch { ctx.emit("toast", "改名失败"); }
+      ctx.emit("rename", { item: it, name: clean });
     }
-    async function doTrash(it: GalleryItem): Promise<void> {
-      menuFor.value = null;
-      try {
-        await content().trash(it.path);
-        if (it.docId) catalog().trash(it.docId);
-        ctx.emit("toast", "已移到回收站");
-        await refresh();
-      } catch { ctx.emit("toast", "删除失败"); }
+    function doTrash(it: GalleryItem): void { menuFor.value = null; ctx.emit("trash", it); }
+
+    function openNewFolder(): void { newFolderMode.value = true; newFolderVal.value = ""; }
+    function commitNewFolder(): void {
+      newFolderMode.value = false;
+      const clean = sanitizeName(newFolderVal.value);
+      if (clean) ctx.emit("newfolder", { parent: currentFolder.value, name: clean });
     }
-    // P4 摄入:上传本地 PDF 到当前文件夹(走 content.upload → store.file.save never-overwrite)。
-    // 多选逐个上传;同名(库 never-overwrite 抛错)→ 单条报错,不挡其余。
-    const uploading = ref(false);
-    async function onUpload(e: Event): Promise<void> {
+    function onUpload(e: Event): void {
       const input = e.target as HTMLInputElement;
       const files = input.files ? Array.from(input.files) : [];
       input.value = "";   // 清空,允许再传同一文件
-      if (!files.length) return;
-      uploading.value = true;
-      let ok = 0; const failed: string[] = [];
-      const base = currentFolder.value ? `${PAPERS_FOLDER}/${currentFolder.value}` : PAPERS_FOLDER;
-      for (const f of files) {
-        const name = sanitizeName(f.name.replace(/\.pdf$/i, "")) + ".pdf";
-        try { await content().upload(`${base}/${name}`, f); ok++; }
-        catch { failed.push(name); }
-      }
-      uploading.value = false;
-      if (ok) ctx.emit("toast", failed.length ? `上传 ${ok} 个,${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
-      else ctx.emit("toast", "上传失败(同名/未登录/离线?)");
-      await refresh();
+      if (files.length) ctx.emit("upload", { folder: currentFolder.value, files });
     }
 
-    function openNewFolder(): void { newFolderMode.value = true; newFolderVal.value = ""; }
-    async function commitNewFolder(): Promise<void> {
-      newFolderMode.value = false;
-      const clean = sanitizeName(newFolderVal.value);
-      if (!clean) return;
-      const rel = currentFolder.value ? `${currentFolder.value}/${clean}` : clean;
-      try { await content().ensureFolder(`${PAPERS_FOLDER}/${rel}`); ctx.emit("toast", "已建文件夹"); await refresh(); }
-      catch { ctx.emit("toast", "建文件夹失败"); }
-    }
-
-    onMounted(() => {
-      const auth = persistence().auth;
-      signedIn.value = auth.getAuthState().signedIn;
-      auth.onAuthChanged((st: any) => { signedIn.value = !!(st && st.signedIn); void refresh(); });
-      void refresh();
-    });
+    onMounted(() => { ctx.emit("refresh"); });   // 挂载即请宿主灌数据
 
     return {
-      items, folders, currentFolder, loading, signedIn, sliced, crumbs,
-      menuFor, editing, editVal, newFolderMode, newFolderVal, uploading,
-      refresh, go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, openNewFolder, commitNewFolder, onUpload,
-      signIn: (): void => { void persistence().auth.signIn(); },
-      signOut: (): void => { void persistence().auth.signOut(); },
+      currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal,
+      go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, openNewFolder, commitNewFolder, onUpload,
+      refresh: (): void => ctx.emit("refresh"),
+      signIn: (): void => ctx.emit("signin"),
+      signOut: (): void => ctx.emit("signout"),
       open: (it: GalleryItem): void => ctx.emit("open", it),
       close: (): void => ctx.emit("close"),
     };
@@ -136,8 +92,8 @@ export const Gallery = defineComponent({
         <a @click="go('')">论文</a>
         <template v-for="c in crumbs"><span class="jrp-crumb-sep">/</span><a @click="go(c.path)">{{ c.name }}</a></template>
         <button class="jrp-newfolder" v-if="signedIn" @click="openNewFolder" title="新建文件夹">＋夹</button>
-        <label class="jrp-newfolder" v-if="signedIn" title="上传 PDF 到此文件夹">{{ uploading ? '上传中…' : '＋传' }}
-          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="uploading" hidden></label>
+        <label class="jrp-newfolder" v-if="signedIn" title="上传 PDF 到此文件夹">{{ loading ? '…' : '＋传' }}
+          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
       </nav>
       <div class="jrp-newfolder-row" v-if="newFolderMode">
         <input class="jrp-gal-edit" :value="newFolderVal" @input="newFolderVal = $event.target.value"
