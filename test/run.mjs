@@ -12,6 +12,7 @@ import "./freshness.test.ts";
 import "./delete.test.ts";
 import "./identity.test.ts";
 import "./trash.test.ts";
+import "./create-store.test.ts";
 import "./collection.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
