@@ -37,6 +37,7 @@ export interface Catalog {
   lastActiveId(): string | null;
   subscribe(fn: (docs: CatalogDoc[]) => void): () => void;
   commitNow(): Promise<void>;
+  flushLocal(): Promise<void>;   // 仅写本地缓存（卸载兜底；离线/强杀续读靠它）
   isDirty(): boolean;
 }
 
@@ -85,6 +86,7 @@ export function createCatalog(opts: CatalogOpts): Catalog {
     lastActiveId(): string | null { const a = sortedActive(); return a.length ? a[0].id : null; },
     subscribe(fn): () => void { subs.add(fn); return () => { subs.delete(fn); }; },
     commitNow: () => { clearFlush(); return c.flush(); },   // 清 debounce timer + 立即推（valuable-save / 显式点）
+    flushLocal: () => c.flushLocal(),                       // 仅本地（同步落盘兜底，无网络）
     isDirty: () => c.isDirty(),
   };
 }

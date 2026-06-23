@@ -102,10 +102,14 @@ export const App = defineComponent({
         jumpscare();
       }
       auth.onAuthChanged((st: any) => { if (st && st.signedIn) void onSignedIn(); });
+      // 离线/未登录也从本地缓存 hydrate 续读（catalog.init 离线时 cloud sync 优雅失败，本地位置仍在）。
+      async function resumeOffline(): Promise<void> {
+        try { await persistence().catalog.init(); jumpscare(); } catch { galleryOpen.value = true; }
+      }
       try {
         const st = await auth.initAuth();
-        if (st.signedIn) await onSignedIn(); else galleryOpen.value = true;
-      } catch { galleryOpen.value = true; }
+        if (st.signedIn) await onSignedIn(); else await resumeOffline();
+      } catch { await resumeOffline(); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
       window.addEventListener("pagehide", flush);
       document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });

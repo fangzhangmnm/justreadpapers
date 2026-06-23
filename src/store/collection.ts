@@ -9,7 +9,10 @@
 import { createFolderFlow } from "./folder-flow.ts";
 import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder } from "./folder-merge.ts";
 import type { FolderEnvelope, FolderItem } from "./folder-merge.ts";
-import type { CloudSync } from "./types.ts";
+import type { CloudSync, LocalCache } from "./types.ts";
+
+// collection 在本地缓存（IDB）里的键名。前缀隔离，绝不与 file 路径（如 "papers/x.pdf"）撞。
+export function collectionLocalKey(name: string): string { return `__collection__/${name}`; }
 
 // 对外 item：调用方给的 payload + 必填 id（uat 不在此——库内部的事）。
 export type CollectionItem<T extends object> = T & { id: string };
@@ -21,6 +24,9 @@ export interface CollectionConfig {
   syncDelayMs?: number;         // 编辑后防抖自动同步（collection 无冲突、union 安全，频繁推也行）
   now?: () => number;           // uat 盖戳（默认 Date.now；测试可注入确定时钟）
   manual?: boolean;             // true=upsert/delete 只标脏不自动调度，由 flush 驱动 commit（阅读位置走 valuable-save 节流）
+  /** 本地缓存（IDB）：透明缓存内存 env → 离线可读 + 强杀存活 + 旧设备旧缓存靠 uat-LWW 不盖新。不传 = 纯内存+云（旧行为）。 */
+  local?: Pick<LocalCache, "save" | "get" | "exists">;
+  localWriteDelayMs?: number;   // 本地写防抖（coalesce 高频 setPosition，避免每帧写 IDB）。默认 400。
 }
 
 export interface Collection<T extends object> {
@@ -30,7 +36,8 @@ export interface Collection<T extends object> {
   getItem(id: string): CollectionItem<T> | undefined;
   items(): CollectionItem<T>[];                       // 全部 item（每条含自己的 id）
   keys(): string[];                                   // 全部 id
-  flush(): Promise<void>;                             // 取消防抖、若脏立即同步
+  flush(): Promise<void>;                             // 取消防抖、写本地 + 若脏立即云同步
+  flushLocal(): Promise<void>;                         // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）
   isDirty(): boolean;
 }
 
@@ -44,15 +51,52 @@ function toItem<T extends object>(e: FolderItem): CollectionItem<T> {
 }
 
 export function createCollection<T extends object>(cfg: CollectionConfig): Collection<T> {
-  const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now(), manual = false } = cfg;
+  const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now(), manual = false,
+    local, localWriteDelayMs = 400 } = cfg;
   const flow = createFolderFlow({ cloud, name, encode, decode, isOnline });
   let env: FolderEnvelope = emptyFolder();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  // ── 本地缓存（IDB）：透明镜像内存 env（含 uat 的完整 envelope）。──────────────────────
+  // hydrate：合并不替换（坏字节 parseFolderBlob 返 null 即忽略，绝不 wipe）；uat 保留（守 A5/B6）。
+  // 写：coalesce 防抖（高频 setPosition 不每帧写 IDB），串行链避免重叠；卸载用 flushLocal 即时落。
+  const localKey = collectionLocalKey(name);
+  let hydrated = false;
+  let localTimer: ReturnType<typeof setTimeout> | null = null;
+  let localChain: Promise<void> = Promise.resolve();
+
+  async function bytesOf(b: Blob | Uint8Array | null): Promise<Uint8Array | null> {
+    if (!b) return null;
+    if (b instanceof Uint8Array) return b;
+    if (typeof (b as Blob).arrayBuffer === "function") return new Uint8Array(await (b as Blob).arrayBuffer());
+    return null;
+  }
+  async function hydrateLocal(): Promise<void> {
+    if (!local || hydrated) return;
+    hydrated = true;
+    try {
+      const cached = parseFolderBlob((await bytesOf(await local.get(localKey))) ?? new Uint8Array(0));
+      if (cached) env = mergeFolders(env, cached);   // 合并进当前 env（保留各 item uat）
+    } catch { /* 坏本地缓存 → 忽略，回退云端 */ }
+  }
+  function clearLocalTimer(): void { if (localTimer != null) { clearTimeout(localTimer); localTimer = null; } }
+  function scheduleLocalWrite(): void {
+    if (!local || localTimer != null) return;
+    localTimer = setTimeout(() => { localTimer = null; void writeLocalNow(); }, localWriteDelayMs);
+  }
+  function writeLocalNow(): Promise<void> {
+    if (!local) return Promise.resolve();
+    clearLocalTimer();
+    const snap = encode(env);                         // 抓当前 env 快照（含 uat）
+    localChain = localChain.then(() => local.save(localKey, snap).then(() => undefined)).catch(() => undefined);
+    return localChain;
+  }
+
   function clearTimer() { if (timer != null) { clearTimeout(timer); timer = null; } }
   function scheduleSync() {
     cloud.setDirty(name, true);
-    if (manual) return;          // 手动模式：只标脏，commit 由调用方 flush() 驱动（valuable-save 节流）
+    scheduleLocalWrite();        // 本地缓存与云无关：manual/auto 都写本地（强杀/离线靠它）
+    if (manual) return;          // 手动模式：只标脏，云 commit 由调用方 flush() 驱动（valuable-save 节流）
     clearTimer();
     timer = setTimeout(() => { timer = null; void sync(); }, syncDelayMs);
   }
@@ -64,6 +108,7 @@ export function createCollection<T extends object>(cfg: CollectionConfig): Colle
   async function sync(): Promise<void> {
     const res = await flow.sync(env);
     env = mergeFolders(env, res.folder);
+    scheduleLocalWrite();   // 把合并后的（含云端）状态也写回本地缓存
     if (res.status === "synced") {
       if (res.etag) cloud.setETag(name, res.etag);
       if (normalizeFolder(env) === normalizeFolder(res.folder)) cloud.setDirty(name, false);
@@ -71,9 +116,11 @@ export function createCollection<T extends object>(cfg: CollectionConfig): Colle
   }
 
   async function init(): Promise<void> {
-    const res = await flow.sync(env);   // 离线则空起步，后续 sync 收敛
+    await hydrateLocal();               // 先从本地缓存 hydrate（秒开 / 离线可读 / 强杀存活）
+    const res = await flow.sync(env);    // 再 pull-merge-push；离线/坏字节则 env 保持本地 hydrate 值，绝不 wipe
     env = mergeFolders(env, res.folder);
     if (res.status === "synced" && res.etag) cloud.setETag(name, res.etag);
+    await writeLocalNow();              // 持久合并结果
   }
 
   function upsertItem(item: CollectionItem<T>): void {
@@ -99,8 +146,13 @@ export function createCollection<T extends object>(cfg: CollectionConfig): Colle
   }
   function items(): CollectionItem<T>[] { return env.items.map((e) => toItem<T>(e)); }
   function keys(): string[] { return env.items.map((e) => String(e.id)); }
-  function flush(): Promise<void> { clearTimer(); return cloud.isDirty(name) ? sync() : Promise.resolve(); }
+  async function flush(): Promise<void> {
+    clearTimer();
+    await writeLocalNow();                          // 先确保本地落（卸载/手动保存兜底）
+    if (cloud.isDirty(name)) await sync();
+  }
+  function flushLocal(): Promise<void> { return writeLocalNow(); }
   function isDirty(): boolean { return cloud.isDirty(name); }
 
-  return { init, upsertItem, deleteItem, getItem, items, keys, flush, isDirty };
+  return { init, upsertItem, deleteItem, getItem, items, keys, flush, flushLocal, isDirty };
 }

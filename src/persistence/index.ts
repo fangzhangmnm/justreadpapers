@@ -87,7 +87,8 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
       try { await catalog.commitNow(); lastPushed = snapshotPositions(); hooks.onSaveState?.("saved"); console.info("[jrp] 位置已落盘 catalog.json"); }
       catch (e) { hooks.onSaveState?.("dirty"); console.warn("[jrp] 位置落盘失败", e); throw e; }
     },
-    keepalive: () => { void catalog.commitNow(); },
+    // 卸载兜底：先同步意图落本地缓存（IDB，可靠的那半，离线/强杀续读靠它），再 best-effort 推云。
+    keepalive: () => { void catalog.flushLocal(); void catalog.commitNow(); },
   });
 
   return {

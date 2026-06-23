@@ -136,11 +136,11 @@ export function createStore(config: StoreConfig) {
 
   // ── collection / settings ──
   function collection<T extends object>(name: string, opts: { manual?: boolean } = {}): Collection<T> {
-    return createCollection<T>({ cloud, name, manual: opts.manual });
+    return createCollection<T>({ cloud, name, local, manual: opts.manual });   // local=IDB 透明缓存（离线可读/强杀存活）
   }
   const localSettings: LocalSettings = createLocalSettings(kv);
   const syncedSettings: SyncedSettings | undefined = syncedSettingsFileName
-    ? createSyncedSettings(createCollection<SettingItem>({ cloud, name: syncedSettingsFileName }))
+    ? createSyncedSettings(createCollection<SettingItem>({ cloud, name: syncedSettingsFileName, local }))
     : undefined;
 
   return {
