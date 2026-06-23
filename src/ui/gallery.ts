@@ -4,7 +4,7 @@
 //   操作 emit 意图(open/rename/trash/newfolder/upload/signin/signout/refresh),宿主执行(碰 store)后回灌 props。
 // 导航 = 面包屑钻入式(全家共识,扁平路径+切片,零 tree-sync bug)。无 expand/collapse 树。
 // 滚动:.jrp-gallery 固定高 flex 列,唯一滚动体 = .jrp-gal-list(flex:1 overflow),head/crumbs 固定不 grow。
-import { defineComponent, ref, computed, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
+import { defineComponent, ref, computed, onMounted, onUnmounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { sliceFolder, breadcrumb, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
@@ -40,6 +40,14 @@ export const Gallery = defineComponent({
     function enter(sub: string): void { currentFolder.value = pathJoin(currentFolder.value, sub); menuFor.value = null; }
 
     function toggleMenu(it: GalleryItem): void { menuFor.value = menuFor.value === it.path ? null : it.path; }
+    function toggleFolderMenu(fd: string): void { const k = "fd:" + fd; menuFor.value = menuFor.value === k ? null : k; }   // folder ⋯ 菜单(键加 fd: 前缀,不与文件 path 撞)
+
+    // smart cloud/login 按钮:登录登出同一个按钮,状态用颜色(借 WebPaint 云态思路;它没做登录切换,自定义)。
+    const online = ref(typeof navigator !== "undefined" ? navigator.onLine : true);
+    function syncOnline(): void { online.value = navigator.onLine; }
+    const cloudState = computed(() => props.loading ? "busy" : !props.signedIn ? "no-auth" : !online.value ? "offline" : "synced");
+    const cloudTitle = computed(() => ({ busy: "同步中…", "no-auth": "未登录 — 点击登录 OneDrive", offline: "离线 — 仅本地缓存", synced: "已登录 — 点击登出" } as Record<string, string>)[cloudState.value]);
+    function toggleLogin(): void { ctx.emit(props.signedIn ? "signout" : "signin"); }
     function startRename(it: GalleryItem): void { editing.value = it.path; editVal.value = it.title; menuFor.value = null; }
     function cancelRename(): void { editing.value = null; }
     // 组件只清洗 + emit 意图(item + 干净显示名);扩展名/路径/store 由宿主处理(保持窄接口、零 app-specific)。
@@ -69,14 +77,14 @@ export const Gallery = defineComponent({
       if (files.length) ctx.emit("upload", { folder: currentFolder.value, files });
     }
 
-    onMounted(() => { ctx.emit("refresh"); });   // 挂载即请宿主灌数据
+    onMounted(() => { ctx.emit("refresh"); window.addEventListener("online", syncOnline); window.addEventListener("offline", syncOnline); });   // 挂载即请宿主灌数据 + 监听在线态
+    onUnmounted(() => { window.removeEventListener("online", syncOnline); window.removeEventListener("offline", syncOnline); });
 
     return {
       currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal,
+      cloudState, cloudTitle, toggleLogin, toggleFolderMenu,
       go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       refresh: (): void => ctx.emit("refresh"),
-      signIn: (): void => ctx.emit("signin"),
-      signOut: (): void => ctx.emit("signout"),
       open: (it: GalleryItem): void => ctx.emit("open", it),
       close: (): void => ctx.emit("close"),
     };
@@ -84,22 +92,21 @@ export const Gallery = defineComponent({
   template: `
     <aside class="jrp-gallery">
       <div class="jrp-gal-head">
+        <button class="jrp-icon jrp-cloud" :data-state="cloudState" @click="toggleLogin" :title="cloudTitle">
+          <svg v-if="cloudState === 'no-auth'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+        </button>
         <template v-if="signedIn">
-          <span class="jrp-gal-acct">已登录</span>
           <button class="jrp-icon" @click="refresh" title="刷新"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
-          <button class="jrp-icon" @click="signOut" title="登出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+          <button class="jrp-icon" @click="openNewFolder" title="新建文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
+          <label class="jrp-icon" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
+            <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
         </template>
-        <button class="jrp-btn jrp-btn-dark" v-else @click="signIn">登录 OneDrive</button>
       </div>
       <nav class="jrp-crumbs">
-        <a @click="go('')">论文</a>
+        <a @click="go('')">根目录</a>
         <template v-for="c in crumbs"><span class="jrp-crumb-sep">/</span><a @click="go(c.path)">{{ c.name }}</a></template>
       </nav>
-      <div class="jrp-gal-ctrlbar" v-if="signedIn">
-        <button class="jrp-ctrl" @click="openNewFolder" title="新建文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
-        <label class="jrp-ctrl" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
-          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
-      </div>
       <div class="jrp-newfolder-row" v-if="newFolderMode">
         <input class="jrp-gal-edit" :value="newFolderVal" @input="newFolderVal = $event.target.value"
           @keydown.enter="commitNewFolder" @keydown.esc="newFolderMode = false" @blur="commitNewFolder"
@@ -112,7 +119,11 @@ export const Gallery = defineComponent({
             <div class="jrp-gal-folder" @click="enter(fd)">
               <svg class="jrp-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>{{ fd }}
             </div>
-            <button class="jrp-gal-dots" @click.stop="deleteFolder(fd)" title="删除空文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            <template v-if="menuFor === 'fd:'+fd">
+              <button class="jrp-gal-act jrp-act-del" @click="deleteFolder(fd)" title="删除空文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+              <button class="jrp-gal-act" @click="toggleFolderMenu(fd)" title="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </template>
+            <button v-else class="jrp-gal-dots" @click.stop="toggleFolderMenu(fd)" title="更多"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
           </div>
           <div class="jrp-gal-file-row" v-for="it in sliced.files" :key="it.path">
             <input v-if="editing === it.path" class="jrp-gal-edit" :value="editVal"
