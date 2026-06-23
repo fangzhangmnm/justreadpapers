@@ -14,6 +14,8 @@ import { createFreshness } from "./freshness.ts";
 import { createDelete } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
+import { createPinSet } from "./pin-set.ts";
+import { createEvict, type EvictResult } from "./evict.ts";
 import { createCollection, type Collection } from "./collection.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -38,6 +40,7 @@ export interface StoreConfig {
   local?: LocalCache;
   getPassword?: (name: string) => string | null;   // 非交互密码源（加密用；默认 null=不解锁）
   validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
+  isOnline?: () => boolean;                          // evict 离线守卫（默认 navigator.onLine）
 }
 
 // ── 文件对象（STORE.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
@@ -47,6 +50,12 @@ export interface RawFile {
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
   isDirty(): boolean;
+  // ── 缓存生命周期（pin/evict；红线守卫在 evict 深模块）──
+  isCached(): Promise<boolean>;
+  isPinned(): boolean;
+  pin(): Promise<void>;                         // 标 pin（离线常驻）+ 确保已缓存
+  unpin(): void;                                // 仅清 pin（不驱逐）
+  evict(opts?: { force?: boolean }): Promise<EvictResult>;   // 守卫式取消缓存（clean∧在线∧云端在∧!pinned）
 }
 export interface ZipFile extends RawFile {
   setPreview(previewBlob: Blob): Promise<void>;
@@ -62,11 +71,14 @@ function localStorageKv(): Kv {
 export function createStore(config: StoreConfig) {
   const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), getPassword = () => null, validateAdopt } = config;
   const local = config.local ?? createLocalCache();   // prod=idb；测试注入 mock-local
+  const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
 
   // ── 脊椎 + 低层 ──
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
+  const pins = createPinSet(kv);
+  const evictMod = createEvict({ cloud, local, head, pins, isOnline });
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
@@ -120,6 +132,14 @@ export function createStore(config: StoreConfig) {
       async rename(newName) { await identity.rename(name, newName); },
       async delete() { await del.del(name); },
       isDirty() { return head.isDirty(name); },
+      isCached() { return local.exists(name); },
+      isPinned() { return pins.has(name); },
+      async pin() {   // 标 pin + 确保缓存（未缓存则 acquire；离线/失败 best-effort，pin 仍记下）
+        pins.add(name);
+        if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError?.(e); } }
+      },
+      unpin() { pins.remove(name); },
+      evict(opts) { return evictMod.evict(name, opts); },
     };
   }
 
@@ -158,6 +178,7 @@ export function createStore(config: StoreConfig) {
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
+    localKeys: () => local.appKeys(),     // 已缓存的应用文件名集合（gallery 批量判 cached）
     restore: trashMod.restore,
     purge: trashMod.purge,
     emptyTrash: trashMod.emptyTrash,

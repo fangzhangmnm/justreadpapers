@@ -111,6 +111,7 @@
     border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 14px; }
   .jrp-newfolder-row { padding: 4px 10px; display: flex; }
   .jrp-gal-file.cached::after { content: '·'; color: #2a8a6a; margin-left: 6px; }
+  .jrp-gal-file.pinned::after { content: '●'; color: var(--link); margin-left: 6px; font-size: 9px; vertical-align: middle; }
   .jrp-gal-msg { padding: 16px; opacity: 0.5; font-size: 13px; }
   /* 目录/阅读控制抽屉：左侧弹出（与论文库同侧，互斥）。首行控制条，下方 TOC。 */
   .jrp-outline { position: absolute; left: 0; top: 0; bottom: 0; width: min(320px, 84vw); z-index: 9;
@@ -154,6 +155,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-764cce132903.mjs"></script>
+<script type="module" src="./dist/jrp-47ebf49de126.mjs"></script>
 </body>
 </html>

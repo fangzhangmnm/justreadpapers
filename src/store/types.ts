@@ -66,6 +66,8 @@ export interface LocalCache {
   save(name: string, bytes: Bytes | Blob, hint?: unknown): Promise<unknown>;
   get(name: string): Promise<Blob | null>;
   exists(name: string): Promise<boolean>;
+  /** 已缓存的**应用文件名**集合（排除 trash/backup/collection 内部命名空间）——gallery 批量判 cached 用。 */
+  appKeys(): Promise<string[]>;
   backup(name: string): Promise<string>;
   trash(name: string): Promise<string>;
   hardDelete(name: string): Promise<void>;

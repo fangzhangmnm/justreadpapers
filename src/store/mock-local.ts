@@ -48,6 +48,7 @@ export function createMockLocal(): MockLocal {
       return (items.has(name) ? items.get(name)! : null) as unknown as Blob | null;
     },
     async exists(name: string) { return items.has(name); },
+    async appKeys() { return [...items.keys()].filter((k) => !k.startsWith("local-trash:") && !k.startsWith(".backup-local/") && !k.startsWith("__collection__/")); },
     async backup(name: string) {
       if (!items.has(name)) throw new Error(`本地无 ${name}，无法备份`);
       const backupName = `.backup-local/${++bk}:${name}`;   // 隐藏命名空间 + counter 防撞（测试确定性）；同名多次也唯一

@@ -23,6 +23,11 @@ export function createLocalCache(): LocalCache {
     },
     async get(name: string) { const r = await idbCache.get(name); return r ? r.blob : null; },
     async exists(name: string) { return (await idbCache.get(name)) !== undefined; },
+    // 已缓存的应用文件名（排除内部命名空间：local-trash: / .backup-local 前缀 / __collection__/）。
+    async appKeys() {
+      const keys = await idbCache.keys();
+      return keys.filter((k) => !k.startsWith(TRASH_PREFIX) && !k.startsWith(LOCAL_BACKUP_PREFIX) && !k.startsWith("__collection__/"));
+    },
     // 覆盖前留底:复制到隐藏 backup 命名空间(yyyymmddhhmmss-guid 防撞;原件不动)。
     async backup(name: string) {
       const r = await idbCache.get(name);

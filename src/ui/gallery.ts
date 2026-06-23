@@ -26,7 +26,7 @@ export const Gallery = defineComponent({
     account: { type: String, default: "" },   // 已登录账号显示名（宿主从 auth 注入；窄接口先这样，folder-tree 后统一收）
     trash: { type: Array, default: () => [] as { cloudId: string; name: string }[] },   // 回收站项（宿主灌）
   },
-  emits: ["open", "close", "toast", "rename", "move", "trash", "restore", "purge", "emptytrash", "loadtrash", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
+  emits: ["open", "close", "toast", "rename", "move", "trash", "cache", "uncache", "restore", "purge", "emptytrash", "loadtrash", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
   setup(props: any, ctx: SetupCtx) {
     const currentFolder = ref("");
     const menuFor = ref<string | null>(null);     // ⋯ 菜单开在哪个 item.path
@@ -70,6 +70,8 @@ export const Gallery = defineComponent({
       ctx.emit("rename", { item: it, name: clean });
     }
     function doTrash(it: GalleryItem): void { menuFor.value = null; ctx.emit("trash", it); }
+    function doCache(it: GalleryItem): void { menuFor.value = null; ctx.emit("cache", it); }
+    function doUncache(it: GalleryItem): void { menuFor.value = null; ctx.emit("uncache", it); }
 
     // 移动到…：组件自带文件夹 picker（候选=所有夹去掉当前夹 + 根），非拖拽。落地=带新前缀 rename（宿主做）。
     const moveTargets = computed(() => {
@@ -109,7 +111,7 @@ export const Gallery = defineComponent({
     return {
       currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal, view, moveFor, moveTargets,
       cloudState, accountOpen, accountInfo, toggleAccount, doSignin, doSignout, doRefresh, toggleFolderMenu,
-      go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, deleteFolder, openNewFolder, commitNewFolder, onUpload,
+      go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, doCache, doUncache, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       openMove, pickMove, cancelMove: (): void => { moveFor.value = null; }, setView, doRestore, doPurge, doEmptyTrash,
       refresh: (): void => ctx.emit("refresh"),
       open: (it: GalleryItem): void => ctx.emit("open", it),
@@ -196,8 +198,10 @@ export const Gallery = defineComponent({
               @input="editVal = $event.target.value" @keydown.enter="commitRename(it)"
               @keydown.esc="cancelRename" @blur="commitRename(it)" autofocus>
             <template v-else>
-              <div class="jrp-gal-file" :class="{ cached: it.cached }" @click="open(it)">{{ it.title }}</div>
+              <div class="jrp-gal-file" :class="{ cached: it.cached, pinned: it.pinned }" @click="open(it)">{{ it.title }}</div>
               <template v-if="menuFor === it.path">
+                <button v-if="!it.pinned" class="jrp-gal-act" @click="doCache(it)" title="缓存到本地"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+                <button v-else class="jrp-gal-act" @click="doUncache(it)" title="取消缓存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><line x1="8" y1="9" x2="16" y2="9"/></svg></button>
                 <button class="jrp-gal-act" @click="startRename(it)" title="改名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
                 <button class="jrp-gal-act" @click="openMove(it)" title="移动到…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="11 11 14 14 11 17"/><line x1="14" y1="14" x2="8" y2="14"/></svg></button>
                 <button class="jrp-gal-act jrp-act-del" @click="doTrash(it)" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
