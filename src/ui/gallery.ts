@@ -72,6 +72,28 @@ export const Gallery = defineComponent({
         await refresh();
       } catch { ctx.emit("toast", "删除失败"); }
     }
+    // P4 摄入:上传本地 PDF 到当前文件夹(走 content.upload → store.file.save never-overwrite)。
+    // 多选逐个上传;同名(库 never-overwrite 抛错)→ 单条报错,不挡其余。
+    const uploading = ref(false);
+    async function onUpload(e: Event): Promise<void> {
+      const input = e.target as HTMLInputElement;
+      const files = input.files ? Array.from(input.files) : [];
+      input.value = "";   // 清空,允许再传同一文件
+      if (!files.length) return;
+      uploading.value = true;
+      let ok = 0; const failed: string[] = [];
+      const base = currentFolder.value ? `${PAPERS_FOLDER}/${currentFolder.value}` : PAPERS_FOLDER;
+      for (const f of files) {
+        const name = sanitizeName(f.name.replace(/\.pdf$/i, "")) + ".pdf";
+        try { await content().upload(`${base}/${name}`, f); ok++; }
+        catch { failed.push(name); }
+      }
+      uploading.value = false;
+      if (ok) ctx.emit("toast", failed.length ? `上传 ${ok} 个,${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
+      else ctx.emit("toast", "上传失败(同名/未登录/离线?)");
+      await refresh();
+    }
+
     function openNewFolder(): void { newFolderMode.value = true; newFolderVal.value = ""; }
     async function commitNewFolder(): Promise<void> {
       newFolderMode.value = false;
@@ -91,8 +113,8 @@ export const Gallery = defineComponent({
 
     return {
       items, folders, currentFolder, loading, signedIn, sliced, crumbs,
-      menuFor, editing, editVal, newFolderMode, newFolderVal,
-      refresh, go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, openNewFolder, commitNewFolder,
+      menuFor, editing, editVal, newFolderMode, newFolderVal, uploading,
+      refresh, go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, openNewFolder, commitNewFolder, onUpload,
       signIn: (): void => { void persistence().auth.signIn(); },
       signOut: (): void => { void persistence().auth.signOut(); },
       open: (it: GalleryItem): void => ctx.emit("open", it),
@@ -114,6 +136,8 @@ export const Gallery = defineComponent({
         <a @click="go('')">论文</a>
         <template v-for="c in crumbs"><span class="jrp-crumb-sep">/</span><a @click="go(c.path)">{{ c.name }}</a></template>
         <button class="jrp-newfolder" v-if="signedIn" @click="openNewFolder" title="新建文件夹">＋夹</button>
+        <label class="jrp-newfolder" v-if="signedIn" title="上传 PDF 到此文件夹">{{ uploading ? '上传中…' : '＋传' }}
+          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="uploading" hidden></label>
       </nav>
       <div class="jrp-newfolder-row" v-if="newFolderMode">
         <input class="jrp-gal-edit" :value="newFolderVal" @input="newFolderVal = $event.target.value"

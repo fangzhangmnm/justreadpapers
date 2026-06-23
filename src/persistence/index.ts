@@ -33,6 +33,14 @@ function createSettings(ls: Store["localSettings"]): Settings {
 
 export type Auth = ReturnType<typeof createOneDriveProvider>["auth"];
 
+export type SaveState = "dirty" | "saving" | "saved";
+
+/** host 注入的 UI 回调：错误 surface（红线：冲突/错误必 surface，不吞 console）+ 保存状态指示。 */
+export interface PersistenceHooks {
+  onError?: (msg: string) => void;
+  onSaveState?: (s: SaveState) => void;
+}
+
 export interface Persistence {
   auth: Auth;
   catalog: Catalog;     // 资产：阅读态(collection)
@@ -44,14 +52,14 @@ export interface Persistence {
   boot(): Promise<{ signedIn: boolean }>;
 }
 
-export function createPersistence(): Persistence {
+export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
   const { provider, auth } = createOneDriveProvider({
     clientId: cfg.CLIENT_ID, msalUrl: cfg.MSAL_URL, scopes: cfg.SCOPES, authority: cfg.AUTHORITY,
   });
   // ui bundle（Model B）：JRP 是 zen reader，busy 暂用轻量透传（无阻塞遮罩），冲突默认 cancel，错误上 console。
   const ui: StoreUI = {
     busy: (_label, fn) => fn(),
-    reportError: (e) => console.warn("[jrp][store]", e),
+    reportError: (e) => { console.warn("[jrp][store]", e); hooks.onError?.("同步出错(已保留本地，稍后自动重试)"); },
   };
   const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配
 
@@ -75,8 +83,9 @@ export function createPersistence(): Persistence {
     debounceMs: cfg.POSITION_DEBOUNCE_MS,
     ceilingMs: cfg.POSITION_CEILING_MS,
     commit: async () => {
-      try { await catalog.commitNow(); lastPushed = snapshotPositions(); console.info("[jrp] 位置已落盘 catalog.json"); }
-      catch (e) { console.warn("[jrp] 位置落盘失败", e); throw e; }
+      hooks.onSaveState?.("saving");
+      try { await catalog.commitNow(); lastPushed = snapshotPositions(); hooks.onSaveState?.("saved"); console.info("[jrp] 位置已落盘 catalog.json"); }
+      catch (e) { hooks.onSaveState?.("dirty"); console.warn("[jrp] 位置落盘失败", e); throw e; }
     },
     keepalive: () => { void catalog.commitNow(); },
   });
@@ -102,7 +111,7 @@ export function createPersistence(): Persistence {
     recordPosition(docId, pos): void {
       catalog.setPosition(docId, pos);
       if (isTrivial(lastPushed.get(docId), pos)) save.markTrivial();
-      else save.mark();
+      else { save.mark(); hooks.onSaveState?.("dirty"); }
     },
     async boot(): Promise<{ signedIn: boolean }> {
       const st = await auth.initAuth();

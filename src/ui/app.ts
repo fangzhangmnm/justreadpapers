@@ -5,7 +5,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast } from "../app-state.ts";
 import { PAPERS_FOLDER } from "../config.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
@@ -33,8 +33,6 @@ export const App = defineComponent({
     const page = ref(0);
     const total = ref(0);
     const spread = ref(0);
-    const toast = ref("");
-    let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
     const themeMode = ref(settings().get("theme") || "auto");
     function resolveTheme(m: string): string { return m === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day") : m; }
@@ -45,14 +43,22 @@ export const App = defineComponent({
     }
     const themeLabel = computed(() => themeMode.value === "auto" ? "跟随系统" : themeMode.value === "day" ? "日间" : "夜间");
     const outlineFlat = computed(() => { const out: OutlineRow[] = []; flattenOutline(outline.value, 0, out); return out; });
+    // 保存状态指示(给续读修复一个可见确认)：未保存/保存中/已保存。
+    const saveLabel = computed(() => {
+      const m: Record<string, string> = { dirty: "未保存", saving: "保存中…", saved: "已保存" };
+      return m[appUi.saveState] || "";
+    });
 
-    function showToast(msg: string): void {
-      toast.value = msg;
-      if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toast.value = ""; }, 2200);
-    }
+    function showToast(msg: string): void { pushToast(msg); }
     const v = (): any => viewerRef.value;
     function nowMs(): number { return Date.now(); }
+
+    // 人工保存阅读位置:显式 flush(若脏立即推云;不脏=已是最新)。Ctrl/Cmd+S 与菜单按钮共用。
+    async function saveNow(): Promise<void> {
+      if (!currentDocId.value) { showToast("没有正在读的论文"); return; }
+      try { await persistence().save.flush(); showToast("已保存阅读位置"); }
+      catch { showToast("保存失败(未登录/离线?)"); }
+    }
 
     async function openPaper(item: { path: string; name: string; title: string }): Promise<void> {
       galleryOpen.value = false;
@@ -103,13 +109,17 @@ export const App = defineComponent({
       const flush = (): void => { persistence().save.flushKeepalive(); };
       window.addEventListener("pagehide", flush);
       document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+      // Ctrl/Cmd+S = 人工保存阅读位置(抢下浏览器"保存网页"对话框)。
+      window.addEventListener("keydown", (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); void saveNow(); }
+      });
     });
 
     function menuRun(fn: () => void): void { menuOpen.value = false; fn(); }
 
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
-      currentDocId, title, pos, page, total, spread, toast, themeLabel, appUi,
+      currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
       onGalleryOpen, onLocalFile,
       onPos: (p: Position): void => { pos.value = p; if (currentDocId.value) persistence().recordPosition(currentDocId.value, p); },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
@@ -128,6 +138,7 @@ export const App = defineComponent({
       toggleSpread: (): void => v()?.toggleSpread(),
       screenshot: (): void => menuRun(() => v()?.screenshot()),
       copyText: (): void => menuRun(() => v()?.copyText()),
+      saveNow: (): void => menuRun(() => { void saveNow(); }),
     };
   },
   template: `
@@ -141,6 +152,7 @@ export const App = defineComponent({
         </button>
         <span class="jrp-fname">{{ title || '打开论文库选一篇' }}</span>
         <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}<template v-if="pos"> · {{ Math.round(pos.yFraction * 100) }}%</template></span>
+        <span class="jrp-save" :class="appUi.saveState" v-if="total && saveLabel" :title="'阅读位置 ' + saveLabel">{{ saveLabel }}</span>
         <button class="jrp-icon" :class="{ pad: !total }" @click="toggleMenu" title="菜单" aria-label="菜单">
           <svg viewBox="0 0 20 20" width="18" height="18"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 6h12M4 10h12M4 14h12"/></svg>
         </button>
@@ -163,17 +175,17 @@ export const App = defineComponent({
             <button @click="zoomOut">−</button><button @click="fitWidth">适配</button><button @click="zoomIn">＋</button>
           </div>
           <button class="jrp-menu-item" @click="toggleSpread">{{ spread ? '切单页' : '切双页' }}</button>
+          <button class="jrp-menu-item" @click="saveNow">保存阅读位置 · Ctrl+S</button>
           <button class="jrp-menu-item" @click="screenshot">截图当前页</button>
           <button class="jrp-menu-item" @click="copyText">复制当前页文本</button>
           <div class="jrp-menu-sep"></div>
         </template>
         <button class="jrp-menu-item" @click="cycleTheme">颜色模式 · {{ themeLabel }}</button>
         <button class="jrp-menu-item" @click="forceUpdate">强制更新</button>
-        <button class="jrp-menu-item" disabled>离线缓存 · 待接 store(G5)</button>
-        <label class="jrp-menu-item">打开本地 PDF<input type="file" accept="application/pdf" @change="onLocalFile" hidden></label>
+        <label class="jrp-menu-item">打开本地 PDF（仅预览，不入库）<input type="file" accept="application/pdf" @change="onLocalFile" hidden></label>
       </div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
-      <div class="jrp-toast" v-if="toast">{{ toast }}</div>
+      <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>
     </div>
   `,
 });

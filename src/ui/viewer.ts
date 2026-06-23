@@ -38,6 +38,9 @@ export const Viewer = defineComponent({
     let lib: any = null, ns: any = null, viewer: any = null, eventBus: any = null, linkService: any = null, pdf: any = null;
     let restorePos: Position | null = null;
     let reporting = false;
+    // 加载门:setDocument→restore 完成前,pdf.js 布局把 scrollTop 摆在 0,
+    // 这些瞬态 scroll 绝不能 emit position(否则覆写 catalog 已存位置 → 续读丢失,"await default 0 覆盖"老坑)。
+    let loading = false;
     let currentKey = "anon";              // 缩放偏好的 doc 键(local file=文件名;cloud=docId)
     let spreadMode = SPREAD_SINGLE;
     let cozyBaseline = 1;                 // factor=1 时的 scale(cozy);保存的是相对它的倍率
@@ -83,7 +86,7 @@ export const Viewer = defineComponent({
       if (viewer && pdf) ctx.emit("page", { page: viewer.currentPageNumber, total: pdf.numPages });
     }
     function onScroll(): void {
-      if (reporting) return;
+      if (loading || reporting) return;
       reporting = true;
       requestAnimationFrame(() => {
         reporting = false;
@@ -106,15 +109,22 @@ export const Viewer = defineComponent({
 
     async function loadBlob(blob: Blob, opts?: { key?: string; pos?: Position | null }): Promise<void> {
       if (!viewer || !lib) return;
+      loading = true;                 // 关门:布局期的 page0 瞬态 scroll 不入 record(restore 完成才开门)
       currentKey = opts?.key || "anon";
       restorePos = opts?.pos ?? null;
-      const data = await blob.arrayBuffer();
-      const base = (await loadPdfjs()).base;
-      const task = lib.getDocument({ data, cMapUrl: base + "cmaps/", cMapPacked: true, standardFontDataUrl: base + "standard_fonts/" });
-      pdf = await task.promise;
-      viewer.setDocument(pdf);
-      linkService.setDocument(pdf);
-      void pdf.getOutline().then((o: any) => ctx.emit("outline", o || [])).catch(() => ctx.emit("outline", []));
+      try {
+        const data = await blob.arrayBuffer();
+        const base = (await loadPdfjs()).base;
+        const task = lib.getDocument({ data, cMapUrl: base + "cmaps/", cMapPacked: true, standardFontDataUrl: base + "standard_fonts/" });
+        pdf = await task.promise;
+        viewer.setDocument(pdf);
+        linkService.setDocument(pdf);
+        void pdf.getOutline().then((o: any) => ctx.emit("outline", o || [])).catch(() => ctx.emit("outline", []));
+      } catch (e) {
+        loading = false;              // 加载失败也开门,否则永久吞掉后续 scroll
+        ctx.emit("toast", "PDF 加载失败");
+        throw e;
+      }
     }
 
     onMounted(async () => {
@@ -129,9 +139,12 @@ export const Viewer = defineComponent({
         spreadMode = settings().getNum("spread", SPREAD_SINGLE) === SPREAD_DOUBLE ? SPREAD_DOUBLE : SPREAD_SINGLE;
         viewer.spreadMode = spreadMode;
         ctx.emit("spread", spreadMode);
-        void applyFit().then(() => { if (restorePos) { restore(restorePos); restorePos = null; } emitPage(); });
+        // 粗调:scale 落定后先 restore 一次,然后开门(page0 布局期 churn 到此为止)。
+        // restorePos 不在此清——留给 pagesloaded 全渲染后精修一次(高度落定,位置才准)。
+        void applyFit().then(() => { if (restorePos) restore(restorePos); emitPage(); loading = false; });
       });
-      eventBus.on("pagesloaded", () => { if (restorePos) { restore(restorePos); restorePos = null; } });
+      // 精修:全页渲染后高度落定,再 restore 一次并清 restorePos;此时门已开,这次 scroll 会把准确位置记下。
+      eventBus.on("pagesloaded", () => { if (restorePos) { restore(restorePos); restorePos = null; } loading = false; });
       eventBus.on("pagechanging", () => emitPage());
       c.addEventListener("scroll", onScroll, { passive: true });
       c.addEventListener("wheel", onWheel, { passive: false });

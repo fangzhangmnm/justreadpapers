@@ -42,6 +42,11 @@
   label.jrp-btn, .jrp-btn-dark { background: var(--dark); color: var(--dark-fg); border-color: var(--dark); }
   .jrp-fname { opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .jrp-pos { margin-left: auto; opacity: 0.6; font-variant-numeric: tabular-nums; }
+  .jrp-save { margin-left: 8px; font-size: 11px; padding: 2px 7px; border-radius: 10px;
+    white-space: nowrap; background: var(--line2); color: var(--fg); opacity: 0.75; }
+  .jrp-save.dirty { background: transparent; opacity: 0.45; }
+  .jrp-save.saving { opacity: 0.6; }
+  .jrp-save.saved { background: var(--line); opacity: 0.85; }
   .jrp-icon { cursor: pointer; padding: 5px; border-radius: 6px; border: none; background: transparent;
     color: var(--fg); display: inline-flex; align-items: center; }
   .jrp-icon:active { background: var(--hover); }
@@ -104,6 +109,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-2fcc5dddf004.mjs"></script>
+<script type="module" src="./dist/jrp-d9fbcdb19448.mjs"></script>
 </body>
 </html>
