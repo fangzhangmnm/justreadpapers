@@ -78,8 +78,10 @@
     box-shadow: 2px 0 12px rgba(0,0,0,0.18); }
   .jrp-gal-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 10px; border-bottom: 1px solid var(--line2); }
   .jrp-gal-acct { font-size: 12px; opacity: 0.6; }
-  .jrp-crumbs { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line2); }
+  .jrp-crumbs { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line2); display: flex; align-items: center; flex-wrap: wrap; }
   .jrp-crumbs a { cursor: pointer; color: var(--link); }
+  .jrp-crumb-home { display: inline-flex; align-items: center; }
+  .jrp-crumb-home svg { width: 16px; height: 16px; }
   .jrp-crumb-sep { opacity: 0.4; margin: 0 4px; }
   .jrp-gal-list { flex: 1; overflow-y: auto; padding: 4px 0; }
   .jrp-gal-folder, .jrp-gal-file { padding: 9px 14px; cursor: pointer; font-size: 14px;
@@ -87,14 +89,18 @@
   .jrp-gal-folder:hover, .jrp-gal-file:hover { background: var(--hover); }
   .jrp-gal-file-row { display: flex; align-items: center; }
   .jrp-gal-file-row .jrp-gal-file { flex: 1; }
-  .jrp-gal-dots { border: none; background: transparent; color: var(--fg); opacity: 0.45; cursor: pointer; padding: 8px 12px; font-size: 15px; }
+  .jrp-gal-dots { border: none; background: transparent; color: var(--fg); opacity: 0.45; cursor: pointer; padding: 8px 12px; display: inline-flex; }
   .jrp-gal-dots:hover { opacity: 1; }
-  .jrp-gal-act { border: none; background: transparent; color: var(--link); cursor: pointer; padding: 8px 8px; font-size: 13px; white-space: nowrap; }
+  .jrp-gal-dots svg { width: 18px; height: 18px; }
+  .jrp-gal-act { border: none; background: transparent; color: var(--link); cursor: pointer; padding: 7px 9px; display: inline-flex; }
+  .jrp-gal-act svg { width: 18px; height: 18px; }
   .jrp-act-del { color: #c0533f; }
   .jrp-gal-edit { flex: 1; box-sizing: border-box; margin: 4px 10px; padding: 7px 9px; border: 1px solid var(--line);
     border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 14px; }
-  .jrp-newfolder { margin-left: auto; border: 1px solid var(--line); background: var(--btn-bg); color: var(--fg);
-    border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+  .jrp-newfolder { border: 1px solid var(--line); background: var(--btn-bg); color: var(--fg);
+    border-radius: 6px; padding: 5px 8px; cursor: pointer; display: inline-flex; align-items: center; }
+  .jrp-newfolder:first-of-type { margin-left: auto; }
+  .jrp-newfolder svg { width: 16px; height: 16px; }
   .jrp-newfolder-row { padding: 4px 10px; display: flex; }
   .jrp-tri { display: inline-block; width: 16px; opacity: 0.5; }
   .jrp-gal-file.cached::after { content: '·'; color: #2a8a6a; margin-left: 6px; }
@@ -132,6 +138,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-44a7052f2f47.mjs"></script>
+<script type="module" src="./dist/jrp-32b79928a3d7.mjs"></script>
 </body>
 </html>
