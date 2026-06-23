@@ -1,52 +1,50 @@
-// PDF 字节面(只读镜像 over cloud-sync)。app 不碰 cloud/Graph/IDB。
-// PDF = 只读镜像:listTree/read 为主;upload(摄入)/rename/trash 是对用户自己文件的管理(走 store 的
-// move-aside/never-overwrite 红线)。**永不查 PDF 的 dirty/status**(避开 G2:isDirty 默认 true 误判镜像)。
-// PDF 本地缓存(Cache API + frecency)是 P3 的 pdf-cache,这层先直 pull。
+// PDF 字节面（只读镜像 over createStore）。app 不碰 cloud/Graph/IDB——全走注入的 store。
+// PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
+// 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
 
-import type { CloudSync, Bytes } from "../store/types.ts";
+import type { Bytes } from "../store/types.ts";
+import type { Store } from "../store/index.ts";
 
 export interface PaperFile {
-  path: string;       // approot 相对路径,如 "papers/Wei 2011.pdf"
+  path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"
   fileName: string;   // basename
-  folder: string;     // 所在文件夹(folder-tree 用),如 "papers"
+  folder: string;     // 所在文件夹（folder-tree 用），如 "papers"
   size: number;
 }
 
 export interface Content {
-  /** 列 approot 下所有 PDF + 文件夹(folder-tree 吃这个)。complete=false → 列举有子树失败,别据此删缓存。 */
+  /** 列 approot 下所有 PDF + 文件夹。complete=false → 列举有子树失败，别据此删缓存。 */
   listTree(): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
-  /** 读 PDF 字节(只读 pull)。 */
+  /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */
   read(path: string): Promise<Blob | null>;
-  /** 摄入:上传 PDF(新文件;store 的 conflictBehavior=fail + 大小核验防覆盖别人同名)。 */
+  /** 摄入：上传 PDF（新文件；store 红线 never-overwrite）。 */
   upload(path: string, bytes: Bytes | Blob): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
-  /** 软删:move 到 .trash(store 红线 move-aside)。 */
+  /** 软删：move 到 .trash（store 红线 move-aside）。 */
   trash(path: string): Promise<void>;
-  /** 新建文件夹(完整 approot 路径,如 "papers/组合")。idempotent。 */
+  /** 新建文件夹（完整 approot 路径）。idempotent。 */
   ensureFolder(path: string): Promise<void>;
 }
 
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
 function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
-export function createContent(cloud: CloudSync): Content {
+type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder">;
+
+export function createContent(store: ContentStore): Content {
+  const raw = (path: string) => store.file(path, { isZip: false });
   return {
     async listTree() {
-      const { files, folders, complete } = await cloud.listAll();
+      const { files, folders, complete } = await store.listAll();
       return {
-        files: files.map((it) => ({
-          path: it.path, fileName: baseName(it.path), folder: dirName(it.path), size: it.size,
-        })),
+        files: files.map((it) => ({ path: it.path, fileName: baseName(it.path), folder: dirName(it.path), size: it.size })),
         folders, complete,
       };
     },
-    async read(path) {
-      const res = await cloud.pull(path);
-      return res ? res.blob : null;
-    },
-    async upload(path, bytes) { await cloud.push(path, bytes); },
-    async rename(oldPath, newPath) { await cloud.rename(oldPath, newPath); },
-    async trash(path) { await cloud.trash(path); },
-    async ensureFolder(path) { await cloud.ensureFolder(path); },
+    read: (path) => raw(path).open(),
+    async upload(path, bytes) { await raw(path).save(bytes); },
+    async rename(oldPath, newPath) { await raw(oldPath).rename(newPath); },
+    async trash(path) { await raw(path).delete(); },
+    async ensureFolder(path) { await store.ensureFolder(path); },
   };
 }

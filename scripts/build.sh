@@ -46,6 +46,17 @@ else
   echo "[build] ⚠ 未装 tsc（node_modules 缺）——跳过类型检查。装一下：npm install" >&2
 fi
 
+# 0.5 store deep-import lint（红线②：app 只准从 store/index.ts 拿 createStore+provider）。
+#     src/ 里(除 src/store/ 自身)deep import 红线 guts = 绕过红线 → 挡构建。
+#     允许：index.ts(barrel) / types.ts(类型) / local-cache.ts(本地 adapter seam) / providers / onedrive-provider。
+GUTS='cloud-sync|folder-store|folder-merge|folder-flow|local-head|push|seal|safe-resolve|freshness|delete|identity|trash|crypto-container|substrate|move-aside|idb-store|create-store|/store/store'
+if viol=$(grep -rnE "from \"[^\"]*store/($GUTS)" src --include='*.ts' | grep -v '^src/store/' || true); [ -n "$viol" ]; then
+  echo "[build] ✗ 红线②违规：app 深 import 了 store 内部 guts（绕过红线）。只准 import store/index.ts。" >&2
+  echo "$viol" >&2
+  exit 1
+fi
+echo "[build] ✓ store deep-import lint 通过"
+
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \

@@ -1,11 +1,11 @@
-// persistence host —— **唯一** import store/* 并构造 provider/cloud/catalog 的地方。
-// 红线②钉死在此一处:grep src/(除本目录 + store/)出现 localStorage/indexedDB/graph/msal = 违规。
-// 对 app 暴露四面 + boot/recordPosition。
+// persistence host —— **唯一** import store 并构造 store/catalog/content 的地方。
+// 红线②钉死在此一处：app 其它处碰 localStorage/indexedDB/graph/store 内部 = 违规（build.sh lint 挡）。
+// 全走 createStore 唯一入口；catalog=阅读态(collection)、content=PDF(file)、settings=store.localSettings。
 
-import { createOneDriveProvider } from "../store/providers/index.ts";
-import { createCloudSync } from "../store/cloud-sync.ts";
+import { createStore, createOneDriveProvider } from "../store/index.ts";
+import type { Store, StoreUI } from "../store/index.ts";
 import { createCatalog } from "./catalog.ts";
-import type { Catalog } from "./catalog.ts";
+import type { Catalog, CatalogPayload } from "./catalog.ts";
 import { createContent } from "./content.ts";
 import type { Content } from "./content.ts";
 import { buildItems } from "../gallery-model.ts";
@@ -13,32 +13,21 @@ import type { GalleryItem, CatalogMeta } from "../gallery-model.ts";
 import { createValuableSave } from "../domain/valuable-save.ts";
 import type { ValuableSave } from "../domain/valuable-save.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import type { CloudItem, Kv } from "../store/types.ts";
 import * as cfg from "../config.ts";
 
-// ── 唯一碰 localStorage 的地方(红线②) ──
-function localStorageKv(): Kv {
-  return {
-    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
-    set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 满/隐私模式 */ } },
-    remove: (k) => { try { localStorage.removeItem(k); } catch { /* */ } },
-  };
-}
-
-// ── 设备本地设置(zoom/spread/theme)。app 调这个,不碰 localStorage ──
+// ── 设备本地设置(zoom/spread/theme)，over store.localSettings(不同步)。app 调这个，不碰 localStorage ──
 export interface Settings {
   get(key: string): string | null;
   set(key: string, val: string): void;
   getNum(key: string, dflt: number): number;
   setNum(key: string, val: number): void;
 }
-function createSettings(kv: Kv): Settings {
-  const K = (k: string): string => `jrp.set:${k}`;
+function createSettings(ls: Store["localSettings"]): Settings {
   return {
-    get: (k) => kv.get(K(k)),
-    set: (k, v) => kv.set(K(k), v),
-    getNum: (k, d) => { const v = kv.get(K(k)); const n = v == null ? NaN : Number(v); return Number.isFinite(n) ? n : d; },
-    setNum: (k, v) => kv.set(K(k), String(v)),
+    get: (k) => ls.get<string>(k) ?? null,
+    set: (k, v) => ls.set(k, v),
+    getNum: (k, d) => { const v = ls.get<number>(k); return typeof v === "number" && Number.isFinite(v) ? v : d; },
+    setNum: (k, v) => ls.set(k, v),
   };
 }
 
@@ -46,33 +35,29 @@ export type Auth = ReturnType<typeof createOneDriveProvider>["auth"];
 
 export interface Persistence {
   auth: Auth;
-  catalog: Catalog;     // 资产:阅读态(folder-store)
-  content: Content;     // PDF 字节(只读镜像)
+  catalog: Catalog;     // 资产：阅读态(collection)
+  content: Content;     // PDF 字节(只读镜像 + 离线缓存)
   settings: Settings;   // 设备本地
-  save: ValuableSave;   // 位置节流,绑 catalog.commitNow
-  /** gallery seam:列 papers/ 下 PDF(剥前缀)⊕ catalog 标题 → {items, folders}。UI 自己 sliceFolder。
-   *  未登录/离线/失败 → 空 + complete:false(UI 据此别误判"空库")。 */
+  save: ValuableSave;   // 位置节流，绑 catalog.commitNow
   listGallery(): Promise<{ items: GalleryItem[]; folders: string[]; complete: boolean }>;
-  /** 滚动汇报位置:trivial(同页+|Δy|<阈值)只标脏;否则排防抖。catalog 内存即时更新供 UI 读。 */
   recordPosition(docId: string, pos: Position): void;
-  /** 启动:initAuth +(若登录)catalog.init。返回即时 auth 状态(后台 silent 探测经 auth.onAuthChanged)。 */
   boot(): Promise<{ signedIn: boolean }>;
 }
 
 export function createPersistence(): Persistence {
-  const kv = localStorageKv();
   const { provider, auth } = createOneDriveProvider({
     clientId: cfg.CLIENT_ID, msalUrl: cfg.MSAL_URL, scopes: cfg.SCOPES, authority: cfg.AUTHORITY,
   });
-  const cloud = createCloudSync({
-    provider, kv,
-    fileName: (n) => n,                                              // name = approot 相对路径
-    match: (it: CloudItem) => !it.isFolder && /\.pdf$/i.test(it.name),   // 只 PDF 进 gallery 列表(catalog.json 走 pull 不受影响)
-    toName: (n) => n,
-  });
-  const catalog = createCatalog({ cloud, name: cfg.CATALOG_NAME, isOnline: () => navigator.onLine });
-  const content = createContent(cloud);
-  const settings = createSettings(kv);
+  // ui bundle（Model B）：JRP 是 zen reader，busy 暂用轻量透传（无阻塞遮罩），冲突默认 cancel，错误上 console。
+  const ui: StoreUI = {
+    busy: (_label, fn) => fn(),
+    reportError: (e) => console.warn("[jrp][store]", e),
+  };
+  const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配
+
+  const catalog = createCatalog({ collection: store.collection<CatalogPayload>(cfg.CATALOG_NAME, { manual: true }) });
+  const content = createContent(store);
+  const settings = createSettings(store.localSettings);
 
   // 上次成功推云的每篇位置 → trivial 基线。
   let lastPushed = new Map<string, Position>();
@@ -93,7 +78,7 @@ export function createPersistence(): Persistence {
       try { await catalog.commitNow(); lastPushed = snapshotPositions(); console.info("[jrp] 位置已落盘 catalog.json"); }
       catch (e) { console.warn("[jrp] 位置落盘失败", e); throw e; }
     },
-    keepalive: () => { void catalog.commitNow(); },                 // unload:best-effort fire-forget
+    keepalive: () => { void catalog.commitNow(); },
   });
 
   return {
@@ -103,7 +88,7 @@ export function createPersistence(): Persistence {
       try {
         const tree = await content.listTree();
         const files = tree.files
-          .filter((f) => f.path.startsWith(prefix))
+          .filter((f) => f.path.startsWith(prefix) && /\.pdf$/i.test(f.path))
           .map((f) => ({ name: f.path.slice(prefix.length), path: f.path }));
         const folders = tree.folders
           .filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length)).filter((p) => p.length > 0);
@@ -111,12 +96,12 @@ export function createPersistence(): Persistence {
         for (const d of catalog.list()) catMap.set(d.fileName, { docId: d.id, name: d.fileName, title: d.title });
         return { items: buildItems(files, catMap), folders, complete: tree.complete };
       } catch {
-        return { items: [], folders: [], complete: false };   // 未登录/离线:别误判空库
+        return { items: [], folders: [], complete: false };
       }
     },
     recordPosition(docId, pos): void {
-      catalog.setPosition(docId, pos);                              // 内存即时(UI 读)
-      if (isTrivial(lastPushed.get(docId), pos)) save.markTrivial();   // fidget:标脏不调度
+      catalog.setPosition(docId, pos);
+      if (isTrivial(lastPushed.get(docId), pos)) save.markTrivial();
       else save.mark();
     },
     async boot(): Promise<{ signedIn: boolean }> {

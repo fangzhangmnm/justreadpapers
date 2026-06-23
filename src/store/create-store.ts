@@ -18,6 +18,7 @@ import { createCollection, type Collection } from "./collection.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
+import { createLocalCache } from "./local-cache.ts";
 
 // ── ui bundle（Model B，STORE.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
@@ -60,8 +61,7 @@ function localStorageKv(): Kv {
 
 export function createStore(config: StoreConfig) {
   const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), getPassword = () => null, validateAdopt } = config;
-  if (!config.local) throw new Error("createStore: 本版需注入 local（idb 适配器尚未在此默认装配）");
-  const local = config.local;
+  const local = config.local ?? createLocalCache();   // prod=idb；测试注入 mock-local
 
   // ── 脊椎 + 低层 ──
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
@@ -135,8 +135,8 @@ export function createStore(config: StoreConfig) {
   }
 
   // ── collection / settings ──
-  function collection<T extends object>(name: string): Collection<T> {
-    return createCollection<T>({ cloud, name });
+  function collection<T extends object>(name: string, opts: { manual?: boolean } = {}): Collection<T> {
+    return createCollection<T>({ cloud, name, manual: opts.manual });
   }
   const localSettings: LocalSettings = createLocalSettings(kv);
   const syncedSettings: SyncedSettings | undefined = syncedSettingsFileName
@@ -150,6 +150,10 @@ export function createStore(config: StoreConfig) {
     syncedSettings,
     list: () => cloud.list(),
     listAll: () => cloud.listAll(),
+    // 文件夹操作（gallery folder-tree）：空文件夹增删走深模块（删除"必须空"在 cloud 内强制）。
+    ensureFolder: (path: string) => cloud.ensureFolder(path),
+    newFolder: (path: string) => ui.busy("新建文件夹…", () => cloud.ensureFolder(path)),
+    deleteFolder: (path: string) => ui.busy("删除文件夹…", () => cloud.removeFolder(path)),
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
@@ -161,3 +165,5 @@ export function createStore(config: StoreConfig) {
     _internal: { head, cloud, sub },
   };
 }
+
+export type Store = ReturnType<typeof createStore>;

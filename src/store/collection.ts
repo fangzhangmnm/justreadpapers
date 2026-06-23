@@ -7,7 +7,7 @@
 //   同步复用 folder-flow（pull-merge-push）。序列化 = JSON（#68：collection 是结构化可合并 JSON，
 //   不要 app 传 encode/decode）。
 import { createFolderFlow } from "./folder-flow.ts";
-import { emptyFolder, parseFolderBlob } from "./folder-merge.ts";
+import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder } from "./folder-merge.ts";
 import type { FolderEnvelope, FolderItem } from "./folder-merge.ts";
 import type { CloudSync } from "./types.ts";
 
@@ -20,6 +20,7 @@ export interface CollectionConfig {
   isOnline?: () => boolean;
   syncDelayMs?: number;         // 编辑后防抖自动同步（collection 无冲突、union 安全，频繁推也行）
   now?: () => number;           // uat 盖戳（默认 Date.now；测试可注入确定时钟）
+  manual?: boolean;             // true=upsert/delete 只标脏不自动调度，由 flush 驱动 commit（阅读位置走 valuable-save 节流）
 }
 
 export interface Collection<T extends object> {
@@ -43,7 +44,7 @@ function toItem<T extends object>(e: FolderItem): CollectionItem<T> {
 }
 
 export function createCollection<T extends object>(cfg: CollectionConfig): Collection<T> {
-  const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now() } = cfg;
+  const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now(), manual = false } = cfg;
   const flow = createFolderFlow({ cloud, name, encode, decode, isOnline });
   let env: FolderEnvelope = emptyFolder();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -51,24 +52,27 @@ export function createCollection<T extends object>(cfg: CollectionConfig): Colle
   function clearTimer() { if (timer != null) { clearTimeout(timer); timer = null; } }
   function scheduleSync() {
     cloud.setDirty(name, true);
+    if (manual) return;          // 手动模式：只标脏，commit 由调用方 flush() 驱动（valuable-save 节流）
     clearTimer();
     timer = setTimeout(() => { timer = null; void sync(); }, syncDelayMs);
   }
 
-  // sync：snapshot 内存 env → folder-flow（pull-merge-push）→ 采纳合并结果（含云端别处的 item）。
-  // dirty 收尾归这里（K12）：只有 "synced" 才清脏；其它状态保留脏 → 不谎报、下次重试。
+  // sync：snapshot 内存 env → folder-flow（pull-merge-push）→ 把合并结果**并回**当前 env。
+  // ★关键：用 mergeFolders 并回、不整体替换——sync 是 async，期间 env 可能又被编辑（如 fire-and-forget
+  //   flush 与后续 upsert 撞车）；per-item LWW 保那些新编辑（更高 uat）不被旧快照的合并结果覆盖。
+  // dirty 收尾（K12）：只有"synced 且并回后没新编辑（== 已推的 res.folder）"才清脏；否则留脏，下次 flush 推新编辑。
   async function sync(): Promise<void> {
     const res = await flow.sync(env);
-    env = res.folder;
+    env = mergeFolders(env, res.folder);
     if (res.status === "synced") {
       if (res.etag) cloud.setETag(name, res.etag);
-      cloud.setDirty(name, false);
+      if (normalizeFolder(env) === normalizeFolder(res.folder)) cloud.setDirty(name, false);
     }
   }
 
   async function init(): Promise<void> {
     const res = await flow.sync(env);   // 离线则空起步，后续 sync 收敛
-    env = res.folder;
+    env = mergeFolders(env, res.folder);
     if (res.status === "synced" && res.etag) cloud.setETag(name, res.etag);
   }
 

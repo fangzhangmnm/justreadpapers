@@ -1,16 +1,18 @@
 import { test, eq, assert } from "./_harness.ts";
 import { createMockProvider } from "../src/store/mock-provider.ts";
 import { createCloudSync, memKv } from "../src/store/cloud-sync.ts";
-import { createCatalog, type Catalog } from "../src/persistence/catalog.ts";
+import { createCollection } from "../src/store/collection.ts";
+import { createCatalog, type Catalog, type CatalogPayload } from "../src/persistence/catalog.ts";
 import type { CloudProvider } from "../src/store/types.ts";
 
-// 在一个(可共享的)mock provider 上造 catalog;clock 用闭包变量,测试自己推进。
+// catalog 现坐在 store.collection(manual) 上;clock 同时喂 collection.now(合并 uat)和 catalog.now(lastReadAt)。
 function mk(provider: CloudProvider, clock: { t: number }): Catalog {
   const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n) => n });
-  return createCatalog({ cloud, name: "catalog.json", now: () => clock.t });
+  const collection = createCollection<CatalogPayload>({ cloud, name: "catalog.json", now: () => clock.t, manual: true });
+  return createCatalog({ collection, now: () => clock.t });
 }
 
-test("upsert + list 按 uat 倒序 + lastActive 派生", async () => {
+test("upsert + list 按 lastReadAt 倒序 + lastActive 派生", async () => {
   const clock = { t: 1000 };
   const cat = mk(createMockProvider(), clock);
   cat.upsert("c-aaa", { fileName: "A.pdf" });
@@ -18,8 +20,8 @@ test("upsert + list 按 uat 倒序 + lastActive 派生", async () => {
   cat.upsert("c-bbb", { fileName: "B.pdf" });
   const list = cat.list();
   eq(list.length, 2, "两篇");
-  eq(list[0].id, "c-bbb", "uat 倒序最近在前");
-  eq(cat.lastActiveId(), "c-bbb", "lastActive = max uat");
+  eq(list[0].id, "c-bbb", "recency 倒序最近在前");
+  eq(cat.lastActiveId(), "c-bbb", "lastActive = max lastReadAt");
   await cat.commitNow();
 });
 
@@ -45,7 +47,7 @@ test("trash 软删 + restore", async () => {
   await cat.commitNow();
 });
 
-test("touch bump uat → 成为 lastActive", async () => {
+test("touch bump recency → 成为 lastActive", async () => {
   const clock = { t: 1000 };
   const cat = mk(createMockProvider(), clock);
   cat.upsert("c-aaa", { fileName: "A.pdf" });
@@ -56,14 +58,14 @@ test("touch bump uat → 成为 lastActive", async () => {
   await cat.commitNow();
 });
 
-test("持久化 round-trip:A commitNow → B init 读回(真 folder-store+cloud-sync+mock)", async () => {
-  const provider = createMockProvider();   // 共享云存储
+test("持久化 round-trip：A commitNow → B init 读回(真 collection+cloud-sync+mock)", async () => {
+  const provider = createMockProvider();
   const A = mk(provider, { t: 1000 });
   A.upsert("c-wei", { fileName: "Wei 2011.pdf", title: "AKLT" });
   A.setPosition("c-wei", { pageIndex: 6, yFraction: 0.38 });
   await A.commitNow();
 
-  const B = mk(provider, { t: 5000 });      // 另一个 tab:不同 kv,同一 provider
+  const B = mk(provider, { t: 5000 });
   await B.init();
   const doc = B.get("c-wei");
   assert(doc !== undefined, "B 读到 A 推的 doc");
