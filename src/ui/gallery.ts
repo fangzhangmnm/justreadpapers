@@ -23,6 +23,7 @@ export const Gallery = defineComponent({
     folders: { type: Array, default: () => [] as string[] },       // 全部真文件夹(含空夹)=空夹单一真相源
     signedIn: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
+    account: { type: String, default: "" },   // 已登录账号显示名（宿主从 auth 注入；窄接口先这样，folder-tree 后统一收）
   },
   emits: ["open", "close", "toast", "rename", "trash", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
   setup(props: any, ctx: SetupCtx) {
@@ -42,12 +43,19 @@ export const Gallery = defineComponent({
     function toggleMenu(it: GalleryItem): void { menuFor.value = menuFor.value === it.path ? null : it.path; }
     function toggleFolderMenu(fd: string): void { const k = "fd:" + fd; menuFor.value = menuFor.value === k ? null : k; }   // folder ⋯ 菜单(键加 fd: 前缀,不与文件 path 撞)
 
-    // smart cloud/login 按钮:登录登出同一个按钮,状态用颜色(借 WebPaint 云态思路;它没做登录切换,自定义)。
+    // smart cloud 按钮（抄 WebPaint cloud-auth-ui）：点开**账号 popup**（账号 + 登录/登出/刷新），不直接登出。
+    // icon：未登录=空心云、已登录=云+勾；颜色 data-cloud-state（已登录=accent，未登录=灰，离线=琥珀）。
     const online = ref(typeof navigator !== "undefined" ? navigator.onLine : true);
     function syncOnline(): void { online.value = navigator.onLine; }
-    const cloudState = computed(() => props.loading ? "busy" : !props.signedIn ? "no-auth" : !online.value ? "offline" : "synced");
-    const cloudTitle = computed(() => ({ busy: "同步中…", "no-auth": "未登录 — 点击登录 OneDrive", offline: "离线 — 仅本地缓存", synced: "已登录 — 点击登出" } as Record<string, string>)[cloudState.value]);
-    function toggleLogin(): void { ctx.emit(props.signedIn ? "signout" : "signin"); }
+    const accountOpen = ref(false);
+    const cloudState = computed(() => props.loading ? "busy" : !props.signedIn ? "no-auth" : !online.value ? "offline" : "signedin");
+    const accountInfo = computed(() => props.signedIn
+      ? `云端：${props.account || "已登录"}${online.value ? "" : "（离线）"}`
+      : (online.value ? "云端：未登录" : "云端：离线"));
+    function toggleAccount(): void { accountOpen.value = !accountOpen.value; menuFor.value = null; }
+    function doSignin(): void { accountOpen.value = false; ctx.emit("signin"); }
+    function doSignout(): void { accountOpen.value = false; ctx.emit("signout"); }
+    function doRefresh(): void { accountOpen.value = false; ctx.emit("refresh"); }
     function startRename(it: GalleryItem): void { editing.value = it.path; editVal.value = it.title; menuFor.value = null; }
     function cancelRename(): void { editing.value = null; }
     // 组件只清洗 + emit 意图(item + 干净显示名);扩展名/路径/store 由宿主处理(保持窄接口、零 app-specific)。
@@ -82,7 +90,7 @@ export const Gallery = defineComponent({
 
     return {
       currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal,
-      cloudState, cloudTitle, toggleLogin, toggleFolderMenu,
+      cloudState, accountOpen, accountInfo, toggleAccount, doSignin, doSignout, doRefresh, toggleFolderMenu,
       go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       refresh: (): void => ctx.emit("refresh"),
       open: (it: GalleryItem): void => ctx.emit("open", it),
@@ -92,17 +100,27 @@ export const Gallery = defineComponent({
   template: `
     <aside class="jrp-gallery">
       <div class="jrp-gal-head">
-        <button class="jrp-icon jrp-cloud" :data-state="cloudState" @click="toggleLogin" :title="cloudTitle">
-          <svg v-if="cloudState === 'no-auth'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+        <button class="jrp-icon jrp-cloud" :data-state="cloudState" @click="toggleAccount" title="云端账号">
+          <svg v-if="!signedIn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>
         </button>
         <template v-if="signedIn">
-          <button class="jrp-icon" @click="refresh" title="刷新"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
           <button class="jrp-icon" @click="openNewFolder" title="新建文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
           <label class="jrp-icon" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
             <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
         </template>
       </div>
+      <template v-if="accountOpen">
+        <div class="jrp-acct-backdrop" @click="accountOpen = false"></div>
+        <div class="jrp-acct-pop">
+          <div class="jrp-acct-info">{{ accountInfo }}</div>
+          <button v-if="!signedIn" class="jrp-menu-item" @click="doSignin">登录 OneDrive</button>
+          <template v-else>
+            <button class="jrp-menu-item" @click="doRefresh">刷新云端列表</button>
+            <button class="jrp-menu-item" @click="doSignout">退出登录</button>
+          </template>
+        </div>
+      </template>
       <nav class="jrp-crumbs">
         <a @click="go('')">根目录</a>
         <template v-for="c in crumbs"><span class="jrp-crumb-sep">/</span><a @click="go(c.path)">{{ c.name }}</a></template>

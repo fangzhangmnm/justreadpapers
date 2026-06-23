@@ -76,14 +76,20 @@
   .jrp-gallery { position: absolute; left: 0; top: 0; bottom: 0; width: min(340px, 84vw); z-index: 9;
     background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column;
     box-shadow: 2px 0 12px rgba(0,0,0,0.18); }
-  /* 论文库工具行：smart cloud 登录 + 刷新 + 新建夹 + 上传，一行左对齐。 */
+  /* 论文库工具行：云账号 + 新建夹 + 上传，一行左对齐。 */
   .jrp-gal-head { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid var(--line2); }
   .jrp-gal-head svg { width: 20px; height: 20px; }
-  /* smart cloud/login 按钮：登录登出同键，状态用颜色（灰=已登录，琥珀=未登录提示/离线）。 */
-  .jrp-cloud[data-state="synced"] { color: var(--fg); opacity: 0.45; }
-  .jrp-cloud[data-state="no-auth"] { color: #c0853f; opacity: 1; }
-  .jrp-cloud[data-state="offline"] { color: #c0853f; opacity: 0.7; }
+  /* smart cloud 账号按钮（抄 WebPaint）：已登录=accent+勾，未登录=灰空心云，离线=琥珀。点开账号 popup。 */
+  .jrp-cloud[data-state="signedin"] { color: var(--link); }
+  .jrp-cloud[data-state="no-auth"] { color: var(--fg); opacity: 0.45; }
+  .jrp-cloud[data-state="offline"] { color: #c0853f; }
   .jrp-cloud[data-state="busy"] { opacity: 0.35; }
+  /* 账号 popup（云 icon 点开）：账号信息 + 登录/登出/刷新；外观抄 ☰ 菜单。 */
+  .jrp-acct-backdrop { position: absolute; inset: 0; z-index: 10; }
+  .jrp-acct-pop { position: absolute; top: 44px; left: 8px; z-index: 11; min-width: 180px;
+    background: var(--menu-bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.22); padding: 4px; }
+  .jrp-acct-info { padding: 8px 14px; font-size: 12px; opacity: 0.6; }
   .jrp-crumbs { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line2); }
   .jrp-crumbs a { cursor: pointer; color: var(--link); }
   .jrp-crumb-sep { opacity: 0.4; margin: 0 4px; }
@@ -139,6 +145,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-d8fcd799f92c.mjs"></script>
+<script type="module" src="./dist/jrp-f10d6203e155.mjs"></script>
 </body>
 </html>

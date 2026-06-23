@@ -40,6 +40,7 @@ export const App = defineComponent({
     const galFolders = ref<string[]>([]);
     const galLoading = ref(false);
     const galSignedIn = ref(false);
+    const galAccount = ref("");   // 已登录账号显示名（喂 Gallery 账号 popup）
     async function refreshGallery(): Promise<void> {
       if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
       galLoading.value = true;
@@ -148,8 +149,10 @@ export const App = defineComponent({
         await persistence().catalog.init();
         jumpscare();
       }
+      const acctName = (st: any): string => (st && st.account && (st.account.username || st.account.name)) || "";
       auth.onAuthChanged((st: any) => {
         galSignedIn.value = !!(st && st.signedIn);
+        galAccount.value = acctName(st);
         void refreshGallery();
         if (st && st.signedIn) void onSignedIn();
       });
@@ -160,6 +163,7 @@ export const App = defineComponent({
       try {
         const st = await auth.initAuth();
         galSignedIn.value = !!st.signedIn;
+        galAccount.value = acctName(st);
         if (st.signedIn) await onSignedIn(); else await resumeOffline();
       } catch { await resumeOffline(); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
@@ -176,7 +180,7 @@ export const App = defineComponent({
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
-      galItems, galFolders, galLoading, galSignedIn,
+      galItems, galFolders, galLoading, galSignedIn, galAccount,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
@@ -219,7 +223,7 @@ export const App = defineComponent({
         </button>
       </header>
       <div class="jrp-body">
-        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading"
+        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount"
           @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery"
           @rename="onGalRename" @trash="onGalTrash" @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
           @signin="onGalSignin" @signout="onGalSignout" />
