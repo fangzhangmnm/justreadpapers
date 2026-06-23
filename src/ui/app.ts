@@ -50,18 +50,21 @@ export const App = defineComponent({
     const galLoading = ref(false);
     const galSignedIn = ref(false);
     const galAccount = ref("");   // 已登录账号显示名（喂 Gallery 账号 popup）
-    const galTrash = ref<{ cloudId: string; name: string }[]>([]);   // 回收站项（懒加载，进 trash 视图才拉）
+    const galTrash = ref<{ cloudId: string; name: string }[]>([]);    // 回收站项（懒加载）
+    const galBackup = ref<{ cloudId: string; name: string }[]>([]);   // 备份箱项（懒加载）
     async function refreshGallery(): Promise<void> {
       if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
       galLoading.value = true;
       try { const g = await persistence().listGallery(); galItems.value = g.items; galFolders.value = g.folders; }
       finally { galLoading.value = false; }
     }
-    async function onGalLoadTrash(): Promise<void> {   // 进回收站视图才拉（不拖慢每次开库）
-      if (!galSignedIn.value) { galTrash.value = []; return; }
+    async function onGalLoadBin(kind: "trash" | "backup"): Promise<void> {   // 进恢复箱视图才拉（不拖慢每次开库）
+      if (!galSignedIn.value) { galTrash.value = []; galBackup.value = []; return; }
       galLoading.value = true;
-      try { galTrash.value = await persistence().content.listTrash(); }
-      catch { galTrash.value = []; } finally { galLoading.value = false; }
+      try {
+        const items = kind === "trash" ? await persistence().content.listTrash() : await persistence().content.listBackup();
+        if (kind === "trash") galTrash.value = items; else galBackup.value = items;
+      } catch { /* 保留旧值 */ } finally { galLoading.value = false; }
     }
     function onGalMove(p: { item: GalleryItem; folder: string }): void {
       const base = pathFolder(p.item.path) ? p.item.path.slice(p.item.path.lastIndexOf("/") + 1) : p.item.path;
@@ -83,15 +86,15 @@ export const App = defineComponent({
           : (({ dirty: "有未保存改动，已保留", offline: "离线，已保留", "cloud-gone": "云端无副本，已保留" } as Record<string, string>)[r.reason || ""] || "已保留"));
       }, "", "取消缓存失败");
     }
-    function onGalRestore(e: { cloudId: string; name: string }): void {
-      void withGalleryBusy(async () => { await persistence().content.restore(e.cloudId, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadTrash(); }, "已恢复", "恢复失败");
+    function onGalRestore(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {
+      void withGalleryBusy(async () => { await persistence().content.restore(e.cloudId, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadBin(e.kind); }, "已恢复", "恢复失败");
     }
-    function onGalPurge(e: { cloudId: string; name: string }): void {
-      void withGalleryBusy(async () => { await persistence().content.purge(e.cloudId, appConfirm); await onGalLoadTrash(); }, "", "删除失败");
+    function onGalPurge(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {
+      void withGalleryBusy(async () => { await persistence().content.purge(e.cloudId, appConfirm); await onGalLoadBin(e.kind); }, "", "删除失败");
     }
     async function onGalEmptyTrash(): Promise<void> {
       if (!(await appConfirm({ title: "清空回收站", body: "彻底删除全部，不可恢复", danger: true }))) return;
-      await withGalleryBusy(async () => { await persistence().content.emptyTrash(); await onGalLoadTrash(); }, "已清空回收站", "清空失败");
+      await withGalleryBusy(async () => { await persistence().content.emptyTrash(); await onGalLoadBin("trash"); }, "已清空回收站", "清空失败");
     }
     async function withGalleryBusy(fn: () => Promise<void>, okMsg: string, failMsg: string): Promise<void> {
       galLoading.value = true;
@@ -226,9 +229,9 @@ export const App = defineComponent({
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
-      galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash,
+      galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
-      onGalLoadTrash, onGalMove, onGalCache, onGalUncache, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
+      onGalLoadBin, onGalMove, onGalCache, onGalUncache, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -270,8 +273,8 @@ export const App = defineComponent({
         </button>
       </header>
       <div class="jrp-body">
-        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount" :trash="galTrash"
-          @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery" @loadtrash="onGalLoadTrash"
+        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount" :trash="galTrash" :backup="galBackup"
+          @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery" @loadbin="onGalLoadBin"
           @rename="onGalRename" @move="onGalMove" @trash="onGalTrash" @cache="onGalCache" @uncache="onGalUncache" @restore="onGalRestore" @purge="onGalPurge" @emptytrash="onGalEmptyTrash"
           @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
           @signin="onGalSignin" @signout="onGalSignout" />

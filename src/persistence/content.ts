@@ -20,6 +20,8 @@ export interface Content {
   listTree(): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
   /** 回收站列表（.trash 里的 PDF；name 已去 [时间戳]）。 */
   listTrash(): Promise<TrashEntry[]>;
+  /** 备份箱列表（.backup 里的 loser 字节；恢复/彻底删走通用 restore/purge）。 */
+  listBackup(): Promise<TrashEntry[]>;
   /** 从回收站恢复到 targetPath（host 决定落点，如 papers/<name>）。 */
   restore(cloudId: string, targetPath: string): Promise<void>;
   /** 永久删除（danger confirm 由 host 经 confirm 注入；store 强制）。 */
@@ -49,7 +51,7 @@ export interface Content {
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
 function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
-type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder" | "listTrash" | "restore" | "purge" | "emptyTrash" | "localKeys">;
+type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder" | "listTrash" | "listBackup" | "restore" | "purge" | "emptyTrash" | "localKeys">;
 
 const stripStamp = (n: string): string => n.replace(/ \[[^\]]*\]$/, "");   // 去 move-aside 的 [yyyymmddhhmmss-guid]
 
@@ -71,6 +73,12 @@ export function createContent(store: ContentStore): Content {
     deleteFolder: (path) => store.deleteFolder(path),
     async listTrash() {
       const items = await store.listTrash();
+      return items
+        .map((it) => ({ cloudId: it.id, name: stripStamp(baseName(it.path || it.name)) }))
+        .filter((e) => /\.pdf$/i.test(e.name));
+    },
+    async listBackup() {
+      const items = await store.listBackup();
       return items
         .map((it) => ({ cloudId: it.id, name: stripStamp(baseName(it.path || it.name)) }))
         .filter((e) => /\.pdf$/i.test(e.name));

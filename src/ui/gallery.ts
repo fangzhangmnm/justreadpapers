@@ -24,9 +24,10 @@ export const Gallery = defineComponent({
     signedIn: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
     account: { type: String, default: "" },   // 已登录账号显示名（宿主从 auth 注入；窄接口先这样，folder-tree 后统一收）
-    trash: { type: Array, default: () => [] as { cloudId: string; name: string }[] },   // 回收站项（宿主灌）
+    trash: { type: Array, default: () => [] as { cloudId: string; name: string }[] },    // 回收站项（宿主灌）
+    backup: { type: Array, default: () => [] as { cloudId: string; name: string }[] },   // 备份箱项（宿主灌）
   },
-  emits: ["open", "close", "toast", "rename", "move", "trash", "cache", "uncache", "restore", "purge", "emptytrash", "loadtrash", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
+  emits: ["open", "close", "toast", "rename", "move", "trash", "cache", "uncache", "restore", "purge", "emptytrash", "loadbin", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
   setup(props: any, ctx: SetupCtx) {
     const currentFolder = ref("");
     const menuFor = ref<string | null>(null);     // ⋯ 菜单开在哪个 item.path
@@ -34,11 +35,14 @@ export const Gallery = defineComponent({
     const editVal = ref("");
     const newFolderMode = ref(false);
     const newFolderVal = ref("");
-    const view = ref<"files" | "trash">("files");  // 文件视图 ↔ 回收站视图（同挂载点切换，抄 WebPaint）
+    const view = ref<"files" | "trash" | "backup">("files");  // 文件视图 ↔ 恢复箱（回收站/备份箱）。同挂载点切换。
     const moveFor = ref<GalleryItem | null>(null);  // 正在「移动到…」的 item（弹文件夹 picker）
 
     const sliced = computed(() => sliceFolder(props.items as GalleryItem[], props.folders as string[], currentFolder.value));
     const crumbs = computed(() => breadcrumb(currentFolder.value));
+    // 恢复箱统一：trash/backup 同形（{cloudId,name} 列表 + 恢复/永久删），只差数据源/标题/有无清空。
+    const binItems = computed(() => (view.value === "trash" ? props.trash : view.value === "backup" ? props.backup : []) as { cloudId: string; name: string }[]);
+    const binTitle = computed(() => (view.value === "trash" ? "回收站" : "备份箱"));
 
     function go(path: string): void { currentFolder.value = path; menuFor.value = null; }
     function enter(sub: string): void { currentFolder.value = pathJoin(currentFolder.value, sub); menuFor.value = null; }
@@ -82,11 +86,11 @@ export const Gallery = defineComponent({
     function openMove(it: GalleryItem): void { menuFor.value = null; moveFor.value = it; }
     function pickMove(folder: string): void { const it = moveFor.value; moveFor.value = null; if (it) ctx.emit("move", { item: it, folder }); }
 
-    // 回收站视图 + 操作（恢复/永久删/清空）—— 全 emit 意图,宿主弹 in-app confirm,绝不 system confirm。
-    function setView(v: "files" | "trash"): void { view.value = v; menuFor.value = null; if (v === "trash") ctx.emit("loadtrash"); }
-    function doRestore(e: { cloudId: string; name: string }): void { ctx.emit("restore", e); }
-    function doPurge(e: { cloudId: string; name: string }): void { ctx.emit("purge", e); }
-    function doEmptyTrash(): void { ctx.emit("emptytrash"); }
+    // 恢复箱视图 + 操作（恢复/永久删/清空）—— 全 emit 意图,宿主弹 in-app confirm,绝不 system confirm。
+    function setView(v: "files" | "trash" | "backup"): void { view.value = v; menuFor.value = null; if (v !== "files") ctx.emit("loadbin", v); }
+    function doRestore(e: { cloudId: string; name: string }): void { ctx.emit("restore", { ...e, kind: view.value }); }
+    function doPurge(e: { cloudId: string; name: string }): void { ctx.emit("purge", { ...e, kind: view.value }); }
+    function doEmptyTrash(): void { ctx.emit("emptytrash"); }   // 仅回收站可清空（备份箱是安全网，无批量清）
 
     function deleteFolder(fd: string): void {
       menuFor.value = null;
@@ -109,7 +113,7 @@ export const Gallery = defineComponent({
     onUnmounted(() => { window.removeEventListener("online", syncOnline); window.removeEventListener("offline", syncOnline); });
 
     return {
-      currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal, view, moveFor, moveTargets,
+      currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal, view, moveFor, moveTargets, binItems, binTitle,
       cloudState, accountOpen, accountInfo, toggleAccount, doSignin, doSignout, doRefresh, toggleFolderMenu,
       go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, doCache, doUncache, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       openMove, pickMove, cancelMove: (): void => { moveFor.value = null; }, setView, doRestore, doPurge, doEmptyTrash,
@@ -121,10 +125,10 @@ export const Gallery = defineComponent({
   template: `
     <aside class="jrp-gallery">
       <div class="jrp-gal-head">
-        <template v-if="view === 'trash'">
+        <template v-if="view !== 'files'">
           <button class="jrp-icon" @click="setView('files')" title="返回图库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-          <span class="jrp-gal-acct">回收站</span>
-          <button class="jrp-icon jrp-act-del" @click="doEmptyTrash" title="清空回收站" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          <span class="jrp-gal-acct">{{ binTitle }}</span>
+          <button v-if="view === 'trash'" class="jrp-icon jrp-act-del" @click="doEmptyTrash" title="清空回收站" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
         </template>
         <template v-else>
           <button class="jrp-icon jrp-cloud" :data-state="cloudState" @click="toggleAccount" title="云端账号">
@@ -136,6 +140,7 @@ export const Gallery = defineComponent({
             <label class="jrp-icon" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
               <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
             <button class="jrp-icon" @click="setView('trash')" title="回收站" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            <button class="jrp-icon" @click="setView('backup')" title="备份箱"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg></button>
           </template>
         </template>
       </div>
@@ -158,16 +163,16 @@ export const Gallery = defineComponent({
           <button v-for="t in moveTargets" :key="t.folder" class="jrp-menu-item" @click="pickMove(t.folder)">{{ t.label }}</button>
         </div>
       </template>
-      <!-- 回收站视图 -->
-      <div class="jrp-gal-list" v-if="view === 'trash'">
+      <!-- 恢复箱视图（回收站/备份箱共用） -->
+      <div class="jrp-gal-list" v-if="view !== 'files'">
         <div v-if="loading" class="jrp-gal-msg">加载中…</div>
         <template v-else>
-          <div class="jrp-gal-file-row" v-for="t in trash" :key="t.cloudId">
+          <div class="jrp-gal-file-row" v-for="t in binItems" :key="t.cloudId">
             <div class="jrp-gal-file">{{ t.name.replace(/\\.pdf$/i, '') }}</div>
             <button class="jrp-gal-act" @click="doRestore(t)" title="恢复"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
             <button class="jrp-gal-act jrp-act-del" @click="doPurge(t)" title="永久删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
           </div>
-          <div v-if="!trash.length" class="jrp-gal-msg">回收站是空的</div>
+          <div v-if="!binItems.length" class="jrp-gal-msg">{{ binTitle }}是空的</div>
         </template>
       </div>
       <!-- 文件视图 -->

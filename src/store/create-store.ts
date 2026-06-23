@@ -178,6 +178,7 @@ export function createStore(config: StoreConfig) {
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
+    listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）
     localKeys: () => local.appKeys(),     // 已缓存的应用文件名集合（gallery 批量判 cached）
     restore: trashMod.restore,
     purge: trashMod.purge,

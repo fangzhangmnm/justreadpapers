@@ -115,6 +115,7 @@ export interface CloudSync {
   listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
   listFolders(): Promise<string[]>;
   listTrash(): Promise<CloudItem[]>;
+  listBackup(): Promise<CloudItem[]>;
   rename(oldName: string, newName: string): Promise<unknown>;
   remove(name: string): Promise<unknown>;
   ensureFolder(path: string): Promise<void>;
