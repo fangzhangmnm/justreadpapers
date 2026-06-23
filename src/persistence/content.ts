@@ -12,9 +12,20 @@ export interface PaperFile {
   size: number;
 }
 
+/** 回收站一项（去掉 move-aside 时间戳后的显示名 + 云端 item id）。 */
+export interface TrashEntry { cloudId: string; name: string; }
+
 export interface Content {
   /** 列 approot 下所有 PDF + 文件夹。complete=false → 列举有子树失败，别据此删缓存。 */
   listTree(): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
+  /** 回收站列表（.trash 里的 PDF；name 已去 [时间戳]）。 */
+  listTrash(): Promise<TrashEntry[]>;
+  /** 从回收站恢复到 targetPath（host 决定落点，如 papers/<name>）。 */
+  restore(cloudId: string, targetPath: string): Promise<void>;
+  /** 永久删除（danger confirm 由 host 经 confirm 注入；store 强制）。 */
+  purge(cloudId: string, confirm: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>): Promise<void>;
+  /** 清空回收站（本地+云端）。 */
+  emptyTrash(): Promise<{ purged: number; failed: unknown[] }>;
   /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */
   read(path: string): Promise<Blob | null>;
   /** 摄入：上传 PDF（新文件；store 红线 never-overwrite）。 */
@@ -31,7 +42,9 @@ export interface Content {
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
 function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
-type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder">;
+type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder" | "listTrash" | "restore" | "purge" | "emptyTrash">;
+
+const stripStamp = (n: string): string => n.replace(/ \[[^\]]*\]$/, "");   // 去 move-aside 的 [yyyymmddhhmmss-guid]
 
 export function createContent(store: ContentStore): Content {
   const raw = (path: string) => store.file(path, { isZip: false });
@@ -49,5 +62,14 @@ export function createContent(store: ContentStore): Content {
     async trash(path) { await raw(path).delete(); },
     async ensureFolder(path) { await store.ensureFolder(path); },
     deleteFolder: (path) => store.deleteFolder(path),
+    async listTrash() {
+      const items = await store.listTrash();
+      return items
+        .map((it) => ({ cloudId: it.id, name: stripStamp(baseName(it.path || it.name)) }))
+        .filter((e) => /\.pdf$/i.test(e.name));
+    },
+    async restore(cloudId, targetPath) { await store.restore({ fromCloud: true, cloudItemId: cloudId, targetName: targetPath }); },
+    async purge(cloudId, confirm) { await store.purge({ cloudItemId: cloudId, confirm }); },
+    async emptyTrash() { const r = await store.emptyTrash({ scope: "both" }); return { purged: r.purged ?? 0, failed: r.failed ?? [] }; },
   };
 }

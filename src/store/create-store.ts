@@ -157,6 +157,7 @@ export function createStore(config: StoreConfig) {
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
+    listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
     restore: trashMod.restore,
     purge: trashMod.purge,
     emptyTrash: trashMod.emptyTrash,

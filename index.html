@@ -135,6 +135,15 @@
   .jrp-menu-item:hover:not([disabled]) { background: var(--hover); }
   .jrp-menu-item[disabled] { opacity: 0.4; cursor: default; }
   .jrp-menu-sep { height: 1px; background: var(--line2); margin: 4px 0; }
+  /* in-app 确认对话（红线：禁 system confirm）。 */
+  .jrp-confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); z-index: 200; }
+  .jrp-confirm { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 201;
+    background: var(--menu-bg); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 260px; max-width: 86vw;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .jrp-confirm-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .jrp-confirm-body { font-size: 13px; opacity: 0.7; margin-bottom: 16px; }
+  .jrp-confirm-btns { display: flex; gap: 8px; justify-content: flex-end; }
+  .jrp-btn-danger { background: #c0533f; color: #fff; border-color: #c0533f; }
   .jrp-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
     background: rgba(44,38,32,0.92); color: #f4efe4; padding: 8px 16px; border-radius: 8px;
     font-size: 13px; z-index: 60; pointer-events: none; }
@@ -145,6 +154,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-f10d6203e155.mjs"></script>
+<script type="module" src="./dist/jrp-764cce132903.mjs"></script>
 </body>
 </html>

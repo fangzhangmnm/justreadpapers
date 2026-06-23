@@ -1,6 +1,6 @@
 // 根组件 = shell 编排。顶栏精简(左:文件夹+目录;中:标题;右:状态+☰),所有选项进 ☰(user 2026-06-21)。
 // 打开论文:read 云字节→docId→catalog upsert/touch→viewer+复位。boot→jumpscare(自动开 lastActive)。
-import { defineComponent, ref, computed, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
+import { defineComponent, ref, computed, reactive, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
@@ -35,17 +35,53 @@ export const App = defineComponent({
     const total = ref(0);
     const spread = ref(0);
 
+    // ── in-app 确认（红线：禁 system confirm）。promise 化：danger 操作 await appConfirm()。后续加密密码也复用此模式。──
+    const confirmState = reactive({ open: false, title: "", body: "", danger: false });
+    let _confirmResolve: ((ok: boolean) => void) | null = null;
+    function appConfirm(ctx: { title: string; body: string; danger?: boolean }): Promise<boolean> {
+      confirmState.open = true; confirmState.title = ctx.title; confirmState.body = ctx.body; confirmState.danger = !!ctx.danger;
+      return new Promise<boolean>((res) => { _confirmResolve = res; });
+    }
+    function confirmAnswer(ok: boolean): void { confirmState.open = false; const r = _confirmResolve; _confirmResolve = null; if (r) r(ok); }
+
     // ── Gallery host：folder div 是窄接口展示组件，宿主在此喂数据 + 执行操作（碰 store）。──
     const galItems = ref<GalleryItem[]>([]);
     const galFolders = ref<string[]>([]);
     const galLoading = ref(false);
     const galSignedIn = ref(false);
     const galAccount = ref("");   // 已登录账号显示名（喂 Gallery 账号 popup）
+    const galTrash = ref<{ cloudId: string; name: string }[]>([]);   // 回收站项（懒加载，进 trash 视图才拉）
     async function refreshGallery(): Promise<void> {
       if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
       galLoading.value = true;
       try { const g = await persistence().listGallery(); galItems.value = g.items; galFolders.value = g.folders; }
       finally { galLoading.value = false; }
+    }
+    async function onGalLoadTrash(): Promise<void> {   // 进回收站视图才拉（不拖慢每次开库）
+      if (!galSignedIn.value) { galTrash.value = []; return; }
+      galLoading.value = true;
+      try { galTrash.value = await persistence().content.listTrash(); }
+      catch { galTrash.value = []; } finally { galLoading.value = false; }
+    }
+    function onGalMove(p: { item: GalleryItem; folder: string }): void {
+      const base = pathFolder(p.item.path) ? p.item.path.slice(p.item.path.lastIndexOf("/") + 1) : p.item.path;
+      const rel = p.folder ? `${p.folder}/${base}` : base;
+      const newPath = `${PAPERS_FOLDER}/${rel}`;
+      if (newPath === p.item.path) return;
+      void withGalleryBusy(async () => {
+        await persistence().content.rename(p.item.path, newPath);
+        if (p.item.docId) persistence().catalog.upsert(p.item.docId, { fileName: rel });
+      }, "已移动", "移动失败(同名?)");
+    }
+    function onGalRestore(e: { cloudId: string; name: string }): void {
+      void withGalleryBusy(async () => { await persistence().content.restore(e.cloudId, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadTrash(); }, "已恢复", "恢复失败");
+    }
+    function onGalPurge(e: { cloudId: string; name: string }): void {
+      void withGalleryBusy(async () => { await persistence().content.purge(e.cloudId, appConfirm); await onGalLoadTrash(); }, "", "删除失败");
+    }
+    async function onGalEmptyTrash(): Promise<void> {
+      if (!(await appConfirm({ title: "清空回收站", body: "彻底删除全部，不可恢复", danger: true }))) return;
+      await withGalleryBusy(async () => { await persistence().content.emptyTrash(); await onGalLoadTrash(); }, "已清空回收站", "清空失败");
     }
     async function withGalleryBusy(fn: () => Promise<void>, okMsg: string, failMsg: string): Promise<void> {
       galLoading.value = true;
@@ -180,8 +216,9 @@ export const App = defineComponent({
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
-      galItems, galFolders, galLoading, galSignedIn, galAccount,
+      galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
+      onGalLoadTrash, onGalMove, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -223,9 +260,10 @@ export const App = defineComponent({
         </button>
       </header>
       <div class="jrp-body">
-        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount"
-          @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery"
-          @rename="onGalRename" @trash="onGalTrash" @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
+        <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount" :trash="galTrash"
+          @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery" @loadtrash="onGalLoadTrash"
+          @rename="onGalRename" @move="onGalMove" @trash="onGalTrash" @restore="onGalRestore" @purge="onGalPurge" @emptytrash="onGalEmptyTrash"
+          @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
           @signin="onGalSignin" @signout="onGalSignout" />
         <aside class="jrp-outline" v-if="outlineOpen">
           <div class="jrp-ctrlbar">
@@ -253,6 +291,15 @@ export const App = defineComponent({
         </template>
         <button class="jrp-menu-item" @click="cycleTheme">颜色模式 · {{ themeLabel }}</button>
         <button class="jrp-menu-item" @click="forceUpdate">强制更新</button>
+      </div>
+      <div class="jrp-confirm-backdrop" v-if="confirmState.open" @click="confirmAnswer(false)"></div>
+      <div class="jrp-confirm" v-if="confirmState.open">
+        <div class="jrp-confirm-title">{{ confirmState.title }}</div>
+        <div class="jrp-confirm-body">{{ confirmState.body }}</div>
+        <div class="jrp-confirm-btns">
+          <button class="jrp-btn" @click="confirmAnswer(false)">取消</button>
+          <button class="jrp-btn" :class="confirmState.danger ? 'jrp-btn-danger' : 'jrp-btn-dark'" @click="confirmAnswer(true)">确定</button>
+        </div>
       </div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>
