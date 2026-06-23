@@ -86,6 +86,8 @@ store.emptyTrash({ scope: "both" });                          // 清空回收站
 
 ### `opts.isZip` —— 决定能否带预览图、加密几层
 
+> ⚠ **as-of 2026-06-23：`setPreview`/`getPreview` 未实现（TODO）**——create-store.ts 里目前 `throw`（zip 预览管线待接入）。下面是**目标形状**、不是现状。JRP 全是 `isZip:false` 的 PDF，暂不受影响。
+
 你的文件是不是 zip 容器格式（`.ora`/`.atlas.zip` 是；`.pdf`/`.txt` 不是），创建时声明。库据此**在编译期**给两种不同的对象：
 
 ```ts
@@ -144,6 +146,8 @@ store.syncedSettings.delete("defaultZoom");
 ---
 
 ## 5. 加密 —— 全 store 管，对 app 透明
+
+> ⚠ **as-of 2026-06-23：整章未实现（TODO）**——`createSevenZip` / config `sevenZip` / `store.encryption` / `encrypted:true` / `saveEncrypted` / `addEncryption` 等本版**都不存在**（create-store.ts 标 `encryptionSaltFileName ⚠TODO 本版未实现`）。本节是**目标 spec、不是现状**，别照此调用。JRP 不加密。
 
 加密的**逻辑**（容器 / 层数 / 预览图加密 / KDF / salt / 验证器 / peek）全在库内。app 只负责两件库做不了的事：**注入 7z 引擎**（见 §1 `sevenZip`）+ **把密码输进来**（库非交互、永不弹框，§7）。
 
