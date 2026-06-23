@@ -32,9 +32,10 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #app, .jrp-shell { height: 100%; }
   .jrp-shell { display: flex; flex-direction: column; }
-  .jrp-topbar { flex: none; display: flex; align-items: center; gap: 12px;
-    padding: 8px 14px; padding-top: calc(8px + env(safe-area-inset-top));
-    background: var(--chrome); border-bottom: 1px solid var(--line); font-size: 13px; }
+  /* zen 顶栏：窄、少占空间（阅读时 UI 越少越好）。 */
+  .jrp-topbar { flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 3px 8px; padding-top: calc(3px + env(safe-area-inset-top));
+    background: var(--chrome); border-bottom: 1px solid var(--line); font-size: 12px; }
   .jrp-controls { display: flex; gap: 6px; align-items: center; }
   .jrp-btn { cursor: pointer; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--line);
     background: var(--btn-bg); color: var(--fg); font-size: 13px; line-height: 1; }
@@ -47,7 +48,7 @@
   .jrp-save.dirty { background: transparent; opacity: 0.45; }
   .jrp-save.saving { opacity: 0.6; }
   .jrp-save.saved { background: var(--line); opacity: 0.85; }
-  .jrp-icon { cursor: pointer; padding: 5px; border-radius: 6px; border: none; background: transparent;
+  .jrp-icon { cursor: pointer; padding: 4px; border-radius: 6px; border: none; background: transparent;
     color: var(--fg); display: inline-flex; align-items: center; }
   .jrp-icon:active { background: var(--hover); }
   .jrp-body { position: relative; flex: 1; min-height: 0; }
@@ -98,24 +99,28 @@
   .jrp-tri { display: inline-block; width: 16px; opacity: 0.5; }
   .jrp-gal-file.cached::after { content: '·'; color: #2a8a6a; margin-left: 6px; }
   .jrp-gal-msg { padding: 16px; opacity: 0.5; font-size: 13px; }
-  .jrp-outline { position: absolute; right: 0; top: 0; bottom: 0; width: min(320px, 84vw); z-index: 9;
-    background: var(--bg); border-left: 1px solid var(--line); display: flex; flex-direction: column;
-    box-shadow: -2px 0 12px rgba(0,0,0,0.18); }
+  /* 目录/阅读控制抽屉：左侧弹出（与论文库同侧，互斥）。首行控制条，下方 TOC。 */
+  .jrp-outline { position: absolute; left: 0; top: 0; bottom: 0; width: min(320px, 84vw); z-index: 9;
+    background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.18); }
+  .jrp-ctrlbar { flex: none; display: flex; align-items: center; justify-content: space-around;
+    padding: 6px 4px; border-bottom: 1px solid var(--line2); }
+  .jrp-ctrl { cursor: pointer; padding: 8px; border-radius: 8px; border: none; background: transparent;
+    color: var(--fg); display: inline-flex; }
+  .jrp-ctrl:active { background: var(--hover); }
+  .jrp-ctrl svg { width: 22px; height: 22px; }
   .jrp-ol-row { padding: 8px 14px; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .jrp-ol-row:hover { background: var(--hover); }
   .jrp-icon.pad { margin-left: auto; }
   /* ☰ 系统菜单:z-index 提到所有层之上 + backdrop(避 z-order 坑) */
   .jrp-menu-backdrop { position: fixed; inset: 0; z-index: 99; }
-  .jrp-menu { position: fixed; top: calc(46px + env(safe-area-inset-top)); right: 10px; z-index: 100;
+  .jrp-menu { position: fixed; top: calc(40px + env(safe-area-inset-top)); right: 10px; z-index: 100;
     background: var(--menu-bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
     box-shadow: 0 6px 24px rgba(0,0,0,0.22); min-width: 180px; }
   .jrp-menu-item { display: block; width: 100%; text-align: left; padding: 11px 16px; border: none;
     background: transparent; color: var(--fg); font-size: 14px; cursor: pointer; }
   .jrp-menu-item:hover:not([disabled]) { background: var(--hover); }
   .jrp-menu-item[disabled] { opacity: 0.4; cursor: default; }
-  .jrp-menu-zoom { display: flex; }
-  .jrp-menu-zoom button { flex: 1; border: none; background: transparent; color: var(--fg); padding: 11px 0; cursor: pointer; font-size: 15px; }
-  .jrp-menu-zoom button:hover { background: var(--hover); }
   .jrp-menu-sep { height: 1px; background: var(--line2); margin: 4px 0; }
   .jrp-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
     background: rgba(44,38,32,0.92); color: #f4efe4; padding: 8px 16px; border-radius: 8px;
@@ -127,6 +132,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-a10624322e24.mjs"></script>
+<script type="module" src="./dist/jrp-a65b90dfce10.mjs"></script>
 </body>
 </html>

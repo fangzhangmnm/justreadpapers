@@ -152,11 +152,11 @@ export const App = defineComponent({
         <button class="jrp-icon" @click="toggleGallery" title="论文库" aria-label="论文库">
           <svg viewBox="0 0 20 20" width="18" height="18"><path fill="currentColor" d="M2 5a1 1 0 0 1 1-1h5l1.5 1.5H17a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
         </button>
-        <button class="jrp-icon" @click="toggleOutline" v-if="outline.length" title="目录" aria-label="目录">
-          <svg viewBox="0 0 20 20" width="18" height="18"><path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M7 6h9M7 10h9M7 14h9M4 6h.01M4 10h.01M4 14h.01"/></svg>
+        <button class="jrp-icon" @click="toggleOutline" v-if="total" title="目录 / 阅读控制" aria-label="目录">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="8" y1="15" x2="13" y2="15"/></svg>
         </button>
         <span class="jrp-fname">{{ title || '打开论文库选一篇' }}</span>
-        <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}<template v-if="pos"> · {{ Math.round(pos.yFraction * 100) }}%</template></span>
+        <span class="jrp-pos" v-if="total">p.{{ page }}/{{ total }}</span>
         <span class="jrp-save" :class="appUi.saveState" v-if="total && saveLabel" :title="'阅读位置 ' + saveLabel">{{ saveLabel }}</span>
         <button class="jrp-icon" :class="{ pad: !total }" @click="toggleMenu" title="菜单" aria-label="菜单">
           <svg viewBox="0 0 20 20" width="18" height="18"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 6h12M4 10h12M4 14h12"/></svg>
@@ -165,9 +165,16 @@ export const App = defineComponent({
       <div class="jrp-body">
         <Gallery v-if="galleryOpen" @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" />
         <aside class="jrp-outline" v-if="outlineOpen">
-          <div class="jrp-gal-head"><button class="jrp-btn" @click="outlineOpen = false">关闭</button><span class="jrp-gal-acct">目录</span></div>
+          <div class="jrp-ctrlbar">
+            <button class="jrp-ctrl" @click="zoomOut" title="缩小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="7.5" y1="11" x2="14.5" y2="11"/></svg></button>
+            <button class="jrp-ctrl" @click="fitWidth" title="适配宽度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 8 4 4 8 4"/><polyline points="20 8 20 4 16 4"/><polyline points="4 16 4 20 8 20"/><polyline points="20 16 20 20 16 20"/><line x1="7" y1="12" x2="17" y2="12"/><polyline points="10 9 7 12 10 15"/><polyline points="14 9 17 12 14 15"/></svg></button>
+            <button class="jrp-ctrl" @click="zoomIn" title="放大"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="7.5" y1="11" x2="14.5" y2="11"/><line x1="11" y1="7.5" x2="11" y2="14.5"/></svg></button>
+            <button class="jrp-ctrl" @click="toggleSpread" :title="spread ? '切单页' : '切双页'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="8" height="14" rx="1"/><rect x="13" y="5" width="8" height="14" rx="1"/></svg></button>
+            <button class="jrp-ctrl" @click="outlineOpen = false; overview()" title="页面总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+          </div>
           <div class="jrp-gal-list">
             <div class="jrp-ol-row" v-for="(o, i) in outlineFlat" :key="i" :style="{ paddingLeft: (10 + o.depth * 16) + 'px' }" @click="goToOutline(o.dest)">{{ o.title }}</div>
+            <div v-if="!outlineFlat.length" class="jrp-gal-msg">此文档无目录</div>
           </div>
         </aside>
         <div class="jrp-backdrop" v-if="galleryOpen || outlineOpen" @click="galleryOpen = false; outlineOpen = false"></div>
@@ -176,11 +183,6 @@ export const App = defineComponent({
       <div class="jrp-menu-backdrop" v-if="menuOpen" @click="menuOpen = false"></div>
       <div class="jrp-menu" v-if="menuOpen">
         <template v-if="total">
-          <div class="jrp-menu-zoom">
-            <button @click="zoomOut">−</button><button @click="fitWidth">适配</button><button @click="zoomIn">＋</button>
-          </div>
-          <button class="jrp-menu-item" @click="toggleSpread">{{ spread ? '切单页' : '切双页' }}</button>
-          <button class="jrp-menu-item" @click="overview">页面总览</button>
           <button class="jrp-menu-item" @click="saveNow">保存阅读位置 · Ctrl+S</button>
           <button class="jrp-menu-item" @click="screenshot">截图当前页</button>
           <button class="jrp-menu-item" @click="copyText">复制当前页文本</button>
