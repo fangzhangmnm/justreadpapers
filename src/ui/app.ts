@@ -82,6 +82,11 @@ export const App = defineComponent({
         showToast(failed.length ? `上传 ${ok} 个，${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
       }, "", "上传失败(同名/未登录/离线?)");
     }
+    function onGalDeleteFolder(rel: string): void {
+      // store removeFolder：非空→抛(catch 提示)；不存在→返 false(已没了,也算成功)。
+      void withGalleryBusy(() => persistence().content.deleteFolder(`${PAPERS_FOLDER}/${rel}`).then(() => undefined),
+        "已删除空文件夹", "删除失败(文件夹非空?)");
+    }
 
     const themeMode = ref(settings().get("theme") || "auto");
     function resolveTheme(m: string): string { return m === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day") : m; }
@@ -124,13 +129,6 @@ export const App = defineComponent({
       await v()?.loadBlob(blob, { key: docId, pos: restore });
     }
     function onGalleryOpen(it: GalleryItem): void { void openPaper({ path: it.path, name: it.name, title: it.title }); }
-
-    async function onLocalFile(e: Event): Promise<void> {
-      const input = e.target as HTMLInputElement;
-      const f = input.files && input.files[0]; if (!f) return;
-      menuOpen.value = false; currentDocId.value = null; title.value = f.name; pos.value = null; outline.value = [];
-      await v()?.loadBlob(f, { key: f.name, pos: null });
-    }
 
     function jumpscare(): void {
       const cat = persistence().catalog;
@@ -179,10 +177,10 @@ export const App = defineComponent({
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
       galItems, galFolders, galLoading, galSignedIn,
-      onGalRename, onGalTrash, onGalNewFolder, onGalUpload, refreshGallery,
+      onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
-      onGalleryOpen, onLocalFile,
+      onGalleryOpen,
       onPos: (p: Position): void => { pos.value = p; if (currentDocId.value) persistence().recordPosition(currentDocId.value, p); },
       onPage: (info: { page: number; total: number }): void => { page.value = info.page; total.value = info.total; },
       onSpread: (m: number): void => { spread.value = m; },
@@ -223,7 +221,7 @@ export const App = defineComponent({
       <div class="jrp-body">
         <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading"
           @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery"
-          @rename="onGalRename" @trash="onGalTrash" @newfolder="onGalNewFolder" @upload="onGalUpload"
+          @rename="onGalRename" @trash="onGalTrash" @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
           @signin="onGalSignin" @signout="onGalSignout" />
         <aside class="jrp-outline" v-if="outlineOpen">
           <div class="jrp-ctrlbar">
@@ -251,7 +249,6 @@ export const App = defineComponent({
         </template>
         <button class="jrp-menu-item" @click="cycleTheme">颜色模式 · {{ themeLabel }}</button>
         <button class="jrp-menu-item" @click="forceUpdate">强制更新</button>
-        <label class="jrp-menu-item">打开本地 PDF（仅预览，不入库）<input type="file" accept="application/pdf" @change="onLocalFile" hidden></label>
       </div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>

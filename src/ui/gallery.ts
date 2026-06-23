@@ -24,7 +24,7 @@ export const Gallery = defineComponent({
     signedIn: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
   },
-  emits: ["open", "close", "toast", "rename", "trash", "newfolder", "upload", "signin", "signout", "refresh"],
+  emits: ["open", "close", "toast", "rename", "trash", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
   setup(props: any, ctx: SetupCtx) {
     const currentFolder = ref("");
     const menuFor = ref<string | null>(null);     // ⋯ 菜单开在哪个 item.path
@@ -52,6 +52,10 @@ export const Gallery = defineComponent({
     }
     function doTrash(it: GalleryItem): void { menuFor.value = null; ctx.emit("trash", it); }
 
+    function deleteFolder(fd: string): void {
+      menuFor.value = null;
+      ctx.emit("deletefolder", pathJoin(currentFolder.value, fd));   // 删空夹意图;非空由 store 拒(宿主 toast)
+    }
     function openNewFolder(): void { newFolderMode.value = true; newFolderVal.value = ""; }
     function commitNewFolder(): void {
       newFolderMode.value = false;
@@ -69,7 +73,7 @@ export const Gallery = defineComponent({
 
     return {
       currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal,
-      go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, openNewFolder, commitNewFolder, onUpload,
+      go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       refresh: (): void => ctx.emit("refresh"),
       signIn: (): void => ctx.emit("signin"),
       signOut: (): void => ctx.emit("signout"),
@@ -88,12 +92,14 @@ export const Gallery = defineComponent({
         <button class="jrp-btn jrp-btn-dark" v-else @click="signIn">登录 OneDrive</button>
       </div>
       <nav class="jrp-crumbs">
-        <a @click="go('')" class="jrp-crumb-home" title="根目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></a>
+        <a @click="go('')">论文</a>
         <template v-for="c in crumbs"><span class="jrp-crumb-sep">/</span><a @click="go(c.path)">{{ c.name }}</a></template>
-        <button class="jrp-newfolder" v-if="signedIn" @click="openNewFolder" title="新建文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
-        <label class="jrp-newfolder" v-if="signedIn" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
-          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
       </nav>
+      <div class="jrp-gal-ctrlbar" v-if="signedIn">
+        <button class="jrp-ctrl" @click="openNewFolder" title="新建文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button>
+        <label class="jrp-ctrl" :title="loading ? '上传中…' : '上传 PDF 到此文件夹'"><svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span v-else>…</span>
+          <input type="file" accept="application/pdf" multiple @change="onUpload" :disabled="loading" hidden></label>
+      </div>
       <div class="jrp-newfolder-row" v-if="newFolderMode">
         <input class="jrp-gal-edit" :value="newFolderVal" @input="newFolderVal = $event.target.value"
           @keydown.enter="commitNewFolder" @keydown.esc="newFolderMode = false" @blur="commitNewFolder"
@@ -102,8 +108,11 @@ export const Gallery = defineComponent({
       <div class="jrp-gal-list">
         <div v-if="loading" class="jrp-gal-msg">加载中…</div>
         <template v-else>
-          <div class="jrp-gal-folder" v-for="fd in sliced.subfolders" :key="'f'+fd" @click="enter(fd)">
-            <span class="jrp-tri">▸</span>{{ fd }}
+          <div class="jrp-gal-file-row" v-for="fd in sliced.subfolders" :key="'f'+fd">
+            <div class="jrp-gal-folder" @click="enter(fd)">
+              <svg class="jrp-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>{{ fd }}
+            </div>
+            <button class="jrp-gal-dots" @click.stop="deleteFolder(fd)" title="删除空文件夹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
           </div>
           <div class="jrp-gal-file-row" v-for="it in sliced.files" :key="it.path">
             <input v-if="editing === it.path" class="jrp-gal-edit" :value="editVal"

@@ -24,12 +24,14 @@ export interface Content {
   trash(path: string): Promise<void>;
   /** 新建文件夹（完整 approot 路径）。idempotent。 */
   ensureFolder(path: string): Promise<void>;
+  /** 删除**空**文件夹（store 强制非空拒删）。返 false=云端已无此夹（noop）。 */
+  deleteFolder(path: string): Promise<boolean>;
 }
 
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
 function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
-type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder">;
+type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder">;
 
 export function createContent(store: ContentStore): Content {
   const raw = (path: string) => store.file(path, { isZip: false });
@@ -46,5 +48,6 @@ export function createContent(store: ContentStore): Content {
     async rename(oldPath, newPath) { await raw(oldPath).rename(newPath); },
     async trash(path) { await raw(path).delete(); },
     async ensureFolder(path) { await store.ensureFolder(path); },
+    deleteFolder: (path) => store.deleteFolder(path),
   };
 }
