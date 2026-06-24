@@ -81,9 +81,8 @@ export const App = defineComponent({
     }
     function onGalOffload(it: GalleryItem): void {
       void withGalleryBusy(async () => {
-        const r = await persistence().content.offload(it.path);
-        showToast(r.status === "offloaded" ? "已移除本地缓存"
-          : (({ dirty: "有未保存改动，已保留", offline: "离线，已保留", "cloud-gone": "云端无副本，已保留" } as Record<string, string>)[r.reason || ""] || "已保留"));
+        await persistence().content.offload(it.path);
+        showToast("已移除本地缓存");
       }, "", "移除缓存失败");
     }
     function onGalRestore(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {

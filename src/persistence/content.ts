@@ -2,7 +2,7 @@
 // PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
 // 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
 
-import type { Bytes, Store, OffloadResult } from "../store/index.ts";
+import type { Bytes, Store } from "../store/index.ts";
 
 export interface PaperFile {
   path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"
@@ -29,8 +29,8 @@ export interface Content {
   emptyTrash(): Promise<{ purged: number; failed: unknown[] }>;
   /** 留一份离线副本（确保已缓存，离线可读）。 */
   keepOffline(path: string): Promise<void>;
-  /** 移除本地副本（守卫式 offload；dirty/离线/云端没了会保留）。 */
-  offload(path: string): Promise<OffloadResult>;
+  /** 移除本地副本（守卫式 offload；非法=唯一副本/不可重取 → 抛错出 banner，不静默丢）。 */
+  offload(path: string): Promise<void>;
   /** 已留作离线（=有本地副本）的应用文件路径集合（gallery 批量判）。 */
   keptOfflineKeys(): Promise<Set<string>>;
   /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */

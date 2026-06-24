@@ -14,7 +14,7 @@ import { createFreshness } from "./freshness.ts";
 import { createDelete } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
-import { createOffload, type OffloadResult } from "./offload.ts";
+import { createOffload } from "./offload.ts";
 import { createCollection, type Collection } from "./collection.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -53,7 +53,7 @@ export interface RawFile {
   // ── 离线副本（keepOffline/offload；无 LRU、无 pin flag：有本地副本 = kept offline）──
   isKeptOffline(): Promise<boolean>;            // 本地有副本？（= 已留作离线）
   keepOffline(): Promise<void>;                 // 留一份离线副本（未缓存则 acquire）。注：open 已含下载子过程，故名 keepOffline 非 download
-  offload(): Promise<OffloadResult>;            // 守卫式移除本地副本（clean∧在线∧云端有→移除；dirty/离线/cloud-gone→保留）
+  offload(): Promise<void>;                     // 合法(clean∧在线∧曾synced∧云端有完整)→hardDelete；非法(唯一副本/不可重取)→抛 OffloadIllegalError（banner）
 }
 export interface ZipFile extends RawFile {
   setPreview(previewBlob: Blob): Promise<void>;

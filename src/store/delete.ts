@@ -68,11 +68,13 @@ export function createDelete(cfg: DeleteCfg) {
         const trashed = await cloud.trash(name);            // 先云端进 .trash（失败抛 → 本地不动）
         if (localPresent) {
           if (wasDirty) {
-            // 本地有未推改动（这份字节只有本地有）→ 删云端版，本地降级 local-only（绝不 hardDelete 未推字节）
+            // #42：本地有未推改动（这份字节世界唯一）→ 先解绑云端谱系变 local-only，再移进**本地** .trash
+            //   （可恢复，绝不 hardDelete 未推字节）。云端版已进云端 .trash。
             head.forget(name);
-            return { status: "demoted-local-only", where: "cloud", trashed };
+            const trashKey = await local!.trash(name);
+            return { status: "trashed", where: "both", trashed, trashKey };
           }
-          await local!.hardDelete(name);                    // 干净副本=云端 .trash 已救着 → 硬删不丢、不留双份
+          await local!.hardDelete(name);                    // #34 offloadable 干净副本=云端 .trash 已救着 → 硬删不留双份
         }
         head.forget(name);
         return { status: "trashed", where: "cloud", trashed };

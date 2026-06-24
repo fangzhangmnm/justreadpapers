@@ -25,13 +25,14 @@ test("删除两端 clean → 云端 .trash + 本地硬删（不留双份）", as
   assert(!(await local.exists("f")), "干净副本硬删");
 });
 
-test("删除两端 dirty → demoted-local-only（脏字节本地保留）", async () => {
+test("删除两端 dirty → 先 local-only 再进本地 trash（#42，脏字节可恢复、不硬删）", async () => {
   const { cloud, local, head, del } = rig();
   await cloud.push("f", enc("X")); await local.save("f", enc("MINE"));
   head.markSeen("f", cloud.getETag("f")); head.recordEdit("f");
   const r = await del("f");
-  eq(r.status, "demoted-local-only", "降级 local-only");
-  assert(await local.exists("f"), "未推脏字节本地保留");
+  eq(r.status, "trashed", "进 trash"); eq(r.where, "both", "云端+本地两端");
+  assert(!(await local.exists("f")), "本地原位已移走");
+  assert(r.trashKey != null, "有本地 trashKey（未推脏字节可从本地 trash 恢复）");
 });
 
 test("离线删除：已同步文件(base 已知)→ 本地 move-aside + 排队云删", async () => {

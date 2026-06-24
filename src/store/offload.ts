@@ -1,37 +1,49 @@
-// ⚠ 使用前必读 STORE.md + MASTER.md §A。store 内部深模块——app 经 createStore 的 file.offload。
+// ⚠ 使用前必读 STORE.md + DATA SAFETY GUIDELINE.md。store 内部深模块——app 经 createStore 的 file.offload。
 //
-// offload（深模块）—— 移除本地副本（offload ≠ delete：只丢本地，云端不动）。红线守卫全在此一处：
-//   只 offload **clean ∧ 在线 ∧ 云端仍有完整副本**；dirty / 离线 / 未登录 / cloud-gone 一律**保留**（不丢未推字节）。
-//   离线/未登录 ⇒ 不可 re-fetch ⇒ 永不 offload（飞机 / 无账号恰恰是绝不能丢本地的地方）。
-//   **无 LRU、无 pin flag**：本地副本本身 = "kept offline"，去留只由用户显式 offload 决定；本模块只守红线。
-// 逻辑零新红线 = 组合现有 head.isDirty / cloud.fetchMeta / local.exists/hardDelete。
+// offload（深模块）—— 移除本地副本（offload ≠ delete：只丢本地，云端不动）。语义对齐 WebPaint unload。
+//   只在「本地是云端某完整版的可重取 shadow」时合法 → hardDelete（不进 local trash，clean 可重下）。
+//   否则本地是**世界唯一副本**（local-only / 未上传 / sync 事故 / dirty / forked / cloud-gone / 离线）→ offload **不适用**
+//   → 抛 OffloadIllegalError（内部错误，经 ui.reportError 出 banner；UX 不该暴露非法 offload，#29）。绝不静默丢字节。
+//
+// 合法判定（用 local-head 已固化的 etag 谱系逻辑，不发明新东西）：
+//   exists ∧ !head.isDirty ∧ 在线 ∧ head.seenBase!=null（曾 synced = 有已知云版 = re-fetchable，对齐 WebPaint「有 etag」）
+//   ∧ cloud.fetchMeta 存在（未登录会取不到 → cloud-gone）∧ meta.size>0（挡历史 0B 云端幻象）。
+//   cloudMoved（云端被别人推新版、etag≠seenBase）仍合法：clean 本地下次 open 会快进，重取拿更新版，不丢。
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
-export interface OffloadResult {
-  status: "offloaded" | "kept";
-  reason?: "dirty" | "offline" | "cloud-gone" | "not-cached";
+export type OffloadIllegalReason = "dirty" | "offline" | "local-only" | "cloud-gone" | "incomplete";
+
+export class OffloadIllegalError extends Error {
+  code = "OFFLOAD_ILLEGAL";
+  reason: OffloadIllegalReason;
+  constructor(name: string, reason: OffloadIllegalReason) {
+    super(`offload "${name}" 不适用（${reason}）：本地是世界唯一副本或不可重取，拒绝丢弃。`);
+    this.name = "OffloadIllegalError";
+    this.reason = reason;
+  }
 }
 
 export interface OffloadCfg {
   cloud: Pick<CloudSync, "fetchMeta">;
   local: Pick<LocalCache, "exists" | "hardDelete">;
-  head: Pick<LocalHead, "isDirty" | "forget">;
+  head: Pick<LocalHead, "isDirty" | "seenBase" | "forget">;
   isOnline?: () => boolean;
 }
 
 export function createOffload(cfg: OffloadCfg) {
   const { cloud, local, head, isOnline } = cfg;
-  // offload 永远是用户显式动作（无自动 LRU）→ 无 pin-protection 这一档；红线守卫（dirty/离线/cloud-gone）不可越。
-  async function offload(name: string): Promise<OffloadResult> {
-    if (!(await local.exists(name))) return { status: "kept", reason: "not-cached" };
-    if (head.isDirty(name)) return { status: "kept", reason: "dirty" };            // 未推字节绝不丢
-    if (isOnline && !isOnline()) return { status: "kept", reason: "offline" };      // 离线/未登录不可重取 → 不 offload
-    const meta = await cloud.fetchMeta(name).catch(() => null);
-    if (!meta) return { status: "kept", reason: "cloud-gone" };                     // 云端没了/未登录取不到 → 唯一好副本，保留
-    await local.hardDelete(name);   // clean ∧ 在线 ∧ 云端有完整副本 → 安全丢本地副本
+  // offload 永远是用户显式动作（无自动 LRU）。非法态抛错（不软返回 kept），合法态 hardDelete。
+  async function offload(name: string): Promise<void> {
+    if (!(await local.exists(name))) return;                                      // 本地没副本 → 无事可做（非危险，no-op）
+    if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // 未推唯一字节
+    if (isOnline && !isOnline()) throw new OffloadIllegalError(name, "offline");   // 不可重取
+    if (head.seenBase(name) == null) throw new OffloadIllegalError(name, "local-only");  // 从没 synced = 无已知云版 = 唯一本地
+    const meta = await cloud.fetchMeta(name).catch(() => null);                    // 未登录/取不到 → null
+    if (!meta) throw new OffloadIllegalError(name, "cloud-gone");                  // 云端没了 → 唯一好副本，保留
+    if (!(meta.size > 0)) throw new OffloadIllegalError(name, "incomplete");       // 0B 云端幻象 → 不可信，绝不据此丢本地
+    await local.hardDelete(name);   // 合法：clean ∧ 在线 ∧ 曾synced ∧ 云端有完整版 → 安全丢本地副本（可重下）
     head.forget(name);              // 清云端谱系（下次 open 重新 acquire）
-    return { status: "offloaded" };
   }
   return { offload };
 }

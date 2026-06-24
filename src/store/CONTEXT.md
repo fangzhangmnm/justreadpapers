@@ -22,6 +22,7 @@
 - **`recordEdit(name)` 是唯一标脏入口**：原子地 set dirty + `_parent ← _base` → **dirty-without-parent 不可表示**（bypass 结构性消除，不是事后绊线）。
 - **seenBase 回退**：`_base` 缺失时回退读 cloud kv etag——**仅**用于 open/refresh 的"云端动没动"比较（非破坏性），**永不**作 dirty 的 If-Match。local-head 是**唯一**碰这个回退的地方（两条 etag 轨道唯一接触点，可审计）。
 - **两条 etag 轨道分开**：local-head 拥 per-tab `_base`/`_parent`；cloud-sync 拥 kv 持久 etag。只在 open/adopt 单向 seed（kv→`_base`），绝不反向。
+- **藏在接口后、app 永不 import**：local-head 是 store 的**内部脊椎**，不在 STORE.md 的 app 面（file/collection/...）里露出；消费它的只有库内深模块（push / freshness / delete / identity / offload / safe-resolve），各自只调它的 8 个方法（`ifMatchFor` / `seenBase` / `isDirty` / `recordEdit` / `markSeen` / `markSynced` / `onPushed` / `forget`）。**它就是最底的版本谱系脊椎，上面没有另一层。**（注：JRP 才把它从 WebPaint 的 `store.ts` inline 抽出来；WebPaint 仍 inline，未来 adapt 回去时以本模块为准。）
 
 ## 红线优先级（取舍时按此排）
 
@@ -40,7 +41,7 @@
 > 本地副本的语义收敛成**一个 bit：在本地 / 不在本地**（= kept offline / 不）。LRU 已废弃 → 没有「受保护 vs 可驱逐」两层 → "pin" 这词没有指称对象，整套 pin/unpin/evict/force 坍缩成两个动词。
 
 - **keepOffline** — 确保本地有一份副本（未缓存则 acquire）。`keepOnOpen:true` 下开即等价自动 keepOffline。**不叫 download**：`open` 内部已含下载子过程，叫 download 会误导。
-- **offload** — 移除本地副本（≠ delete，云端不动）。**红线守卫全在 `offload` 深模块一处**：只 `clean ∧ 在线 ∧ 已登录 ∧ 云端有完整副本` 才移除；dirty / 离线 / 未登录 / cloud-gone 一律保留（那时本地是唯一好副本）。offload 永远是用户显式动作（无自动 LRU），故无 pin-protection 这一档。
+- **offload** — 移除本地副本（≠ delete，云端不动）。**红线守卫全在 `offload` 深模块一处**，复用 local-head 的 etag 谱系逻辑（不发明）：合法 = `clean ∧ 在线 ∧ 已登录 ∧ head.seenBase!=null（曾 synced = 有已知云版 = re-fetchable，对齐 WebPaint「有 etag」）∧ cloud.fetchMeta 存在 ∧ meta.size>0（挡 0B 幻象）`。cloudMoved（云端 etag≠seenBase 但有完整版）仍合法。**非法（dirty / 离线 / 未登录 / local-only / cloud-gone / 0B）= 本地是世界唯一副本 → 抛 `OffloadIllegalError`**（不软返回 kept；经 ui.reportError 出 banner，UX 不该暴露非法 offload）。要清掉唯一副本走 **delete** 语义，不是 offload。
 - **keepOnOpen**（store ctor）— 消费模式。`true`=读者/编辑器（JRP/JRB/WebPaint…），开即留本地；`false`=流式/过路消费（RealHome/Background Radio），开不留本地、只显式 keepOffline 才落地（⚠TODO 未实现，连 §2 range/streaming 一起设计）。
 
 ## 反-duplicate 不变量（本库存在的唯一意义 = AI 不得绕）
@@ -54,3 +55,7 @@ grep -rnE 'evict|offload|LRU|frecency|cacheCap|ensureRoom|storage\.estimate|reco
 ```
 
 store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-state.ts` 驱逐守卫 / `app-store.ts` cloud-gone 收敛 / `cloud-freshness.ts` 陈旧锁——吸进库后旧码喂不到输入、自然枯死）。
+
+## ⏸ 暂缓：cloud-gone / reconcile 收敛（pin，#43）
+
+裂卡 E / cloud-move A→B 的 reconcile（list-fetch 时：clean-unpinned 缺→drop、pinned/dirty 缺→ghost、整列空→failed-fetch 守卫）**这轮不做**——WebPaint v227-228 那版（etag-tombstone）未真机验，且 JRP 已把它当 store 域从 app 层丢出。**钉死的安全 fallback**：旧设备发现 cloud-gone（曾 synced 但云端 path 没了）→ **变 local-only（留着、不 auto-delete）**——比自动删安全、可接受。等存在性模块单独立项再补。
