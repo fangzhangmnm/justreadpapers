@@ -117,7 +117,15 @@ export function createCollection<T extends object>(cfg: CollectionConfig): Colle
 
   async function init(): Promise<void> {
     await hydrateLocal();               // 先从本地缓存 hydrate（秒开 / 离线可读 / 强杀存活）
-    const res = await flow.sync(env);    // 再 pull-merge-push；离线/坏字节则 env 保持本地 hydrate 值，绝不 wipe
+    // 快路径（freshness etag-skip）：clean ∧ 在线 ∧ 有已知 etag ∧ 云端 etag 没变 → 本地 hydrate 即最新，
+    //   **跳过整份 pull-merge-push**（只一次轻量 fetchMeta，秒开）。否则落到下面的完整 sync。
+    //   安全：getETag(name)=本地缓存对应的云版（init/sync 时与 IDB env 一起更新）；dirty 时不走（要推未推编辑）；
+    //   etag 变=云端真动过→必须 pull；离线/fetchMeta 失败→也落完整 sync（其内部离线优雅、绝不 wipe 本地）。
+    if (!cloud.isDirty(name) && (!isOnline || isOnline()) && cloud.getETag(name)) {
+      const meta = await cloud.fetchMeta(name).catch(() => null);
+      if (meta && meta.etag === cloud.getETag(name)) return;   // 云端没变 → 不重 pull
+    }
+    const res = await flow.sync(env);    // pull-merge-push；离线/坏字节则 env 保持本地 hydrate 值，绝不 wipe
     env = mergeFolders(env, res.folder);
     if (res.status === "synced" && res.etag) cloud.setETag(name, res.etag);
     await writeLocalNow();              // 持久合并结果

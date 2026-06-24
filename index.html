@@ -149,12 +149,12 @@
     background: rgba(44,38,32,0.92); color: #f4efe4; padding: 8px 16px; border-radius: 8px;
     font-size: 13px; z-index: 60; pointer-events: none; }
   .jrp-update { bottom: 64px; background: #2c2620; pointer-events: auto; cursor: pointer; }
-  /* 全屏 busy 遮罩(对齐 JRB「busy 永远全屏」):盖住打开论文的粗→精跳变 + 危险写操作,吞输入防误触 */
-  .jrp-busy { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.30); pointer-events: auto;
+  /* 全屏 busy 遮罩(对齐 JRB「busy 永远全屏」):**不透明**盖住打开论文的粗→精跳变(否则半透下仍闪) + 危险写操作,吞输入防误触 */
+  .jrp-busy { position: fixed; inset: 0; z-index: 150; background: var(--view-bg); pointer-events: auto;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-  .jrp-busy-spin { width: 34px; height: 34px; border: 3px solid rgba(255,255,255,0.28);
-    border-top-color: #fff; border-radius: 50%; animation: jrp-spin 0.8s linear infinite; }
-  .jrp-busy-label { color: #f4efe4; font-size: 13px; }
+  .jrp-busy-spin { width: 34px; height: 34px; border: 3px solid var(--line);
+    border-top-color: var(--fg); border-radius: 50%; animation: jrp-spin 0.8s linear infinite; }
+  .jrp-busy-label { color: var(--fg); opacity: 0.6; font-size: 13px; }
   @keyframes jrp-spin { to { transform: rotate(360deg); } }
   /* PDF 纸页保持白(夜间 = 深底白页,适合阅读) */
   .jrp-viewer .pdfViewer .page { margin: 10px auto; border: none; box-shadow: 0 1px 8px rgba(0,0,0,0.3); }
@@ -162,6 +162,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-a6802203ea49.mjs"></script>
+<script type="module" src="./dist/jrp-6bbbd57969d4.mjs"></script>
 </body>
 </html>

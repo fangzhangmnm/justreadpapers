@@ -149,3 +149,32 @@ test("[cache] dirty 跨 reload 持久 → 下次能推", async () => {
   await B.init();
   eq(B.getItem("doc")?.pageIndex, 3, "数据也在本地");
 });
+
+// ── 9. init etag-skip 快路径（clean ∧ 云端 etag 没变 → 不重 pull，秒开；用户 #1 提的优化）──
+test("[cache] init etag-skip：clean ∧ 云端没变 → 跳过 pull（秒开）", async () => {
+  const provider = createMockProvider();
+  const local = createMockLocal(); const kv = memKv();
+  const A = dev(provider, local, kv, 100);
+  A.upsertItem({ id: "wei", pageIndex: 7, yFraction: 0.5 });
+  await A.flush();                              // 云端有数据 + kv 存 etag
+  const cloud = createCloudSync({ provider, kv, fileName: (n) => n });
+  let pulls = 0; const orig = cloud.pull.bind(cloud);
+  (cloud as unknown as { pull: typeof cloud.pull }).pull = (n: string) => { pulls++; return orig(n); };
+  const B = createCollection<Pos>({ cloud, name: NAME, local, now: () => 200, syncDelayMs: 0 });
+  await B.init();
+  eq(pulls, 0, "etag 没变 → 没重新 pull（走快路径）");
+  eq(B.getItem("wei")?.pageIndex, 7, "仍从本地 hydrate 读到");
+});
+
+// ── 10. 云端 etag 变了 → 仍 pull（快路径不误跳，freshness 不破）──
+test("[cache] init：云端 etag 变了 → 仍 pull 到新位置（freshness 不破）", async () => {
+  const provider = createMockProvider();
+  const local = createMockLocal(); const kv = memKv();
+  const A = dev(provider, local, kv, 100);
+  A.upsertItem({ id: "wei", pageIndex: 7, yFraction: 0.5 }); await A.flush();
+  const C = dev(provider, createMockLocal(), memKv(), 300);   // 另一设备改云端 → etag 变
+  await C.init(); C.upsertItem({ id: "wei", pageIndex: 99, yFraction: 0.1 }); await C.flush();
+  const B = dev(provider, local, kv, 400);                    // reload B：本地+kv 是 A 的旧 etag
+  await B.init();
+  eq(B.getItem("wei")?.pageIndex, 99, "云端变了 → pull 到新位置（快路径只在 etag 相同才跳）");
+});
