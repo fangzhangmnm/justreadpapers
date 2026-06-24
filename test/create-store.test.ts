@@ -59,6 +59,17 @@ test("RawFile 运行时无 setPreview / ZipFile 有", () => {
   assert("setPreview" in s.file("a.ora", { isZip: true }), "ZipFile 有 setPreview");
 });
 
+test("keepOnOpen:false 过路 open：拉云返字节但不落本地（#5）", async () => {
+  const provider = createMockProvider();
+  await mkStore(provider).file("papers/wei.pdf", { isZip: false }).save(enc("PDFBYTES"));   // A 存云
+  const localB = createMockLocal();
+  const B = createStore({ provider, ui: { busy: (_l, fn) => fn() }, local: localB, kv: memKv(), keepOnOpen: false });
+  const blob = await B.file("papers/wei.pdf", { isZip: false }).open();
+  eq(await asStr(blob), "PDFBYTES", "过路也能读回云端字节");
+  assert(!(await B.file("papers/wei.pdf", { isZip: false }).isKeptOffline()), "过路 open 不落本地（isKeptOffline=false）");
+  eq(localB._items.size, 0, "本地 mock 仍空（没缓存）");
+});
+
 test("file.delete 经 store", async () => {
   const provider = createMockProvider();
   const s = mkStore(provider);

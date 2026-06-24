@@ -40,6 +40,8 @@ export interface PersistenceHooks {
   onError?: (msg: string) => void;
   onSaveState?: (s: SaveState) => void;
   onBusy?: (label: string | null) => void;   // 全屏遮罩驱动（store 危险写操作锁屏；label=进入、null=退出，ref-count 在 host）
+  resolveConflict?: NonNullable<StoreUI["resolveConflict"]>;   // 冲突 sheet（红线：冲突必 surface）；不给 → store 默认 cancel(留 dirty)
+  askPassword?: NonNullable<StoreUI["askPassword"]>;           // 密码输入（加密用，非交互永不弹框由 store 保证）；不给 → null
 }
 
 export interface Persistence {
@@ -61,6 +63,8 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
   const ui: StoreUI = {
     busy: async (label, fn) => { hooks.onBusy?.(label); try { return await fn(); } finally { hooks.onBusy?.(null); } },
     reportError: (e) => { console.warn("[jrp][store]", e); hooks.onError?.("同步出错(已保留本地，稍后自动重试)"); },
+    resolveConflict: (ctx) => (hooks.resolveConflict ? hooks.resolveConflict(ctx) : Promise.resolve("cancel" as const)),
+    askPassword: (ctx) => (hooks.askPassword ? hooks.askPassword(ctx) : Promise.resolve(null)),
   };
   const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配
 

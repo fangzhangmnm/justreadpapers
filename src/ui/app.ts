@@ -5,7 +5,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell, pushToast, withBusy } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, passwordUi, answerPassword } from "../app-state.ts";
 import { PAPERS_FOLDER } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -235,6 +235,7 @@ export const App = defineComponent({
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
+      conflictUi, answerConflict, passwordUi, answerPassword,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -315,6 +316,26 @@ export const App = defineComponent({
         <div class="jrp-confirm-btns">
           <button class="jrp-btn" @click="confirmAnswer(false)">取消</button>
           <button class="jrp-btn" :class="confirmState.danger ? 'jrp-btn-danger' : 'jrp-btn-dark'" @click="confirmAnswer(true)">确定</button>
+        </div>
+      </div>
+      <div class="jrp-confirm-backdrop" v-if="conflictUi.open"></div>
+      <div class="jrp-confirm" v-if="conflictUi.open">
+        <div class="jrp-confirm-title">云端有冲突版本</div>
+        <div class="jrp-confirm-body">「{{ conflictUi.name }}」云端被改过、你本地也改了。保留哪份？（另一份进 .backup，不丢）</div>
+        <div class="jrp-confirm-btns">
+          <button class="jrp-btn" @click="answerConflict('cancel')">先不动</button>
+          <button class="jrp-btn" @click="answerConflict('takeCloud')">用云端</button>
+          <button class="jrp-btn jrp-btn-dark" @click="answerConflict('keepMine')">保留我的</button>
+        </div>
+      </div>
+      <div class="jrp-confirm-backdrop" v-if="passwordUi.open"></div>
+      <div class="jrp-confirm" v-if="passwordUi.open">
+        <div class="jrp-confirm-title">需要密码</div>
+        <div class="jrp-confirm-body">「{{ passwordUi.name }}」是加密文件，输入密码。</div>
+        <input class="jrp-gal-edit" type="password" v-model="passwordUi.input" @keydown.enter="answerPassword(passwordUi.input || null)" placeholder="密码" />
+        <div class="jrp-confirm-btns">
+          <button class="jrp-btn" @click="answerPassword(null)">取消</button>
+          <button class="jrp-btn jrp-btn-dark" @click="answerPassword(passwordUi.input || null)">确定</button>
         </div>
       </div>
       <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div></div>

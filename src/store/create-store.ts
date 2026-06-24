@@ -41,7 +41,7 @@ export interface StoreConfig {
   getPassword?: (name: string) => string | null;   // 非交互密码源（加密用；默认 null=不解锁）
   validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
-  keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开不留本地)⚠TODO 未实现
+  keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
 }
 
 // ── 文件对象（STORE.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
@@ -69,7 +69,6 @@ function localStorageKv(): Kv {
 
 export function createStore(config: StoreConfig) {
   const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), getPassword = () => null, validateAdopt, keepOnOpen = true } = config;
-  if (!keepOnOpen) throw new Error("createStore: keepOnOpen:false（过路/流式 open，开不留本地）⚠TODO 未实现（STORE.md §2，待 range/streaming 接入）");
   const local = config.local ?? createLocalCache();   // prod=idb；测试注入 mock-local
   const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
 
@@ -143,8 +142,14 @@ export function createStore(config: StoreConfig) {
         catch (e) { ui.reportError?.(e); }
       },
       async open() {
-        if (!(await local.exists(name))) await identity.acquire(name, { localName: name });
-        else await fresh.open(name).catch((e) => ui.reportError?.(e));
+        if (await local.exists(name)) {                          // 有本地副本（kept）→ freshness 检查后读本地
+          await fresh.open(name).catch((e) => ui.reportError?.(e));
+        } else if (keepOnOpen) {                                  // 持有模式（读者/编辑器）→ 拉云落本地（白得离线缓存）
+          await identity.acquire(name, { localName: name });
+        } else {                                                 // 过路模式（keepOnOpen:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
+          const pulled = await cloud.pull(name).catch((e) => { ui.reportError?.(e); return null; });
+          return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
+        }
         const blob = await local.get(name);
         if (!blob) return null;
         const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
