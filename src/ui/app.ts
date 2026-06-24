@@ -198,8 +198,8 @@ export const App = defineComponent({
       let resumed = false;
       async function onSignedIn(): Promise<void> {
         if (resumed) return; resumed = true;
-        await persistence().catalog.init();
-        jumpscare();
+        // 整段 boot 续读裹一个遮罩：catalog.init(网络) → jumpscare→openPaper(自己也 withBusy，嵌套连续) → 不闪不双转。
+        await withBusy("打开…", async () => { await persistence().catalog.init(); jumpscare(); });
       }
       const acctName = (st: any): string => (st && st.account && (st.account.username || st.account.name)) || "";
       auth.onAuthChanged((st: any) => {
@@ -210,7 +210,7 @@ export const App = defineComponent({
       });
       // 离线/未登录也从本地缓存 hydrate 续读（catalog.init 离线时 cloud sync 优雅失败，本地位置仍在）。
       async function resumeOffline(): Promise<void> {
-        try { await persistence().catalog.init(); jumpscare(); } catch { galleryOpen.value = true; }
+        try { await withBusy("打开…", async () => { await persistence().catalog.init(); jumpscare(); }); } catch { galleryOpen.value = true; }
       }
       try {
         const st = await auth.initAuth();

@@ -49,6 +49,8 @@ export const Viewer = defineComponent({
     // 这些瞬态 scroll 绝不能 emit position(否则覆写 catalog 已存位置 → 续读丢失,"await default 0 覆盖"老坑)。
     let loading = false;
     let readyResolve: (() => void) | null = null;   // loadBlob 等 pagesloaded 精调完才 resolve（app busy 遮罩盖住粗→精跳变）
+    let viewerReadyResolve: (() => void) | null = null;
+    const viewerReady = new Promise<void>((r) => { viewerReadyResolve = r; });   // onMounted 装好 pdf.js+viewer 才 resolve；loadBlob 等它（boot 时 viewer 没就绪不再早退）
     let currentKey = "anon";              // 缩放偏好的 doc 键(local file=文件名;cloud=docId)
     let spreadMode = SPREAD_SINGLE;
     let cozyBaseline = 1;                 // factor=1 时的 scale(cozy);保存的是相对它的倍率
@@ -199,6 +201,7 @@ export const Viewer = defineComponent({
     function goToPage(n: number): void { if (viewer) viewer.currentPageNumber = n; }
 
     async function loadBlob(blob: Blob, opts?: { key?: string; pos?: Position | null }): Promise<void> {
+      await viewerReady;            // boot 时 viewer 可能还没装好：等它（不再早退 → 遮罩一直罩到 PDF 真渲完，不漏渲）
       if (!viewer || !lib) return;
       setOverview(false); clearOverview();   // 换论文:关总览 + 弃旧骨架(下次开时按新 pdf 重建)
       loading = true;                 // 关门:布局期的 page0 瞬态 scroll 不入 record(restore 完成才开门)
@@ -247,6 +250,7 @@ export const Viewer = defineComponent({
       c.addEventListener("scroll", onScroll, { passive: true });
       c.addEventListener("wheel", onWheel, { passive: false });
       thumbRef.value?.querySelector("[data-thumb-close]")?.addEventListener("click", () => setOverview(false));
+      viewerReadyResolve?.();   // pdf.js + viewer + 所有事件都装好了 → 放行等待中的 loadBlob
     });
     onUnmounted(() => {
       const c = containerRef.value;

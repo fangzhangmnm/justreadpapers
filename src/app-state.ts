@@ -16,7 +16,7 @@ export const appUi = reactive({
 
 // 全屏 busy 遮罩驱动（ref-count，可重入）：store 的 ui.busy（经 onBusy hook）+ app 的 openPaper 共用同一个遮罩。
 let _busyCount = 0;
-export function pushBusy(label = "请稍候…"): void { _busyCount++; appUi.busy = label; }
+export function pushBusy(label = "请稍候…"): void { if (_busyCount === 0) appUi.busy = label; _busyCount++; }   // 只在 0→1 设 label：嵌套 busy 不换字 → 整段一个连续遮罩（不闪不双转）
 export function popBusy(): void { _busyCount = Math.max(0, _busyCount - 1); if (_busyCount === 0) appUi.busy = ""; }
 export async function withBusy<T>(label: string, fn: () => Promise<T>): Promise<T> {
   pushBusy(label);
