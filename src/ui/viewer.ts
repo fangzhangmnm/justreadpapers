@@ -48,6 +48,7 @@ export const Viewer = defineComponent({
     // 加载门:setDocument→restore 完成前,pdf.js 布局把 scrollTop 摆在 0,
     // 这些瞬态 scroll 绝不能 emit position(否则覆写 catalog 已存位置 → 续读丢失,"await default 0 覆盖"老坑)。
     let loading = false;
+    let readyResolve: (() => void) | null = null;   // loadBlob 等 pagesloaded 精调完才 resolve（app busy 遮罩盖住粗→精跳变）
     let currentKey = "anon";              // 缩放偏好的 doc 键(local file=文件名;cloud=docId)
     let spreadMode = SPREAD_SINGLE;
     let cozyBaseline = 1;                 // factor=1 时的 scale(cozy);保存的是相对它的倍率
@@ -203,6 +204,9 @@ export const Viewer = defineComponent({
       loading = true;                 // 关门:布局期的 page0 瞬态 scroll 不入 record(restore 完成才开门)
       currentKey = opts?.key || "anon";
       restorePos = opts?.pos ?? null;
+      // ready：pagesloaded 精调完才 resolve（让 app 的全屏 busy 遮罩盖住「粗调→精调」那一跳）。兜底超时防永久挂。
+      const ready = new Promise<void>((res) => { readyResolve = res; });
+      const safety = setTimeout(() => { readyResolve?.(); readyResolve = null; }, 12000);
       try {
         const data = await blob.arrayBuffer();
         const base = (await loadPdfjs()).base;
@@ -213,9 +217,12 @@ export const Viewer = defineComponent({
         void pdf.getOutline().then((o: any) => ctx.emit("outline", o || [])).catch(() => ctx.emit("outline", []));
       } catch (e) {
         loading = false;              // 加载失败也开门,否则永久吞掉后续 scroll
+        readyResolve?.(); readyResolve = null; clearTimeout(safety);   // 失败也解锁遮罩
         ctx.emit("toast", "PDF 加载失败");
         throw e;
       }
+      await ready;                    // 等 pagesloaded 精调完成（或兜底超时）→ openPaper 的 busy 此刻才解锁 → 不闪
+      clearTimeout(safety);
     }
 
     onMounted(async () => {
@@ -235,7 +242,7 @@ export const Viewer = defineComponent({
         void applyFit().then(() => { if (restorePos) restore(restorePos); emitPage(); loading = false; });
       });
       // 精修:全页渲染后高度落定,再 restore 一次并清 restorePos;此时门已开,这次 scroll 会把准确位置记下。
-      eventBus.on("pagesloaded", () => { if (restorePos) { restore(restorePos); restorePos = null; } loading = false; });
+      eventBus.on("pagesloaded", () => { if (restorePos) { restore(restorePos); restorePos = null; } loading = false; readyResolve?.(); readyResolve = null; });
       eventBus.on("pagechanging", () => emitPage());
       c.addEventListener("scroll", onScroll, { passive: true });
       c.addEventListener("wheel", onWheel, { passive: false });

@@ -39,6 +39,7 @@ export type SaveState = "dirty" | "saving" | "saved";
 export interface PersistenceHooks {
   onError?: (msg: string) => void;
   onSaveState?: (s: SaveState) => void;
+  onBusy?: (label: string | null) => void;   // 全屏遮罩驱动（store 危险写操作锁屏；label=进入、null=退出，ref-count 在 host）
 }
 
 export interface Persistence {
@@ -56,9 +57,9 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
   const { provider, auth } = createOneDriveProvider({
     clientId: cfg.CLIENT_ID, msalUrl: cfg.MSAL_URL, scopes: cfg.SCOPES, authority: cfg.AUTHORITY,
   });
-  // ui bundle（Model B）：JRP 是 zen reader，busy 暂用轻量透传（无阻塞遮罩），冲突默认 cancel，错误上 console。
+  // ui bundle（Model B）：busy = **全屏遮罩**（对齐 JRB，防书签乱闪/危险写操作误触）；冲突默认 cancel；错误 surface。
   const ui: StoreUI = {
-    busy: (_label, fn) => fn(),
+    busy: async (label, fn) => { hooks.onBusy?.(label); try { return await fn(); } finally { hooks.onBusy?.(null); } },
     reportError: (e) => { console.warn("[jrp][store]", e); hooks.onError?.("同步出错(已保留本地，稍后自动重试)"); },
   };
   const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配

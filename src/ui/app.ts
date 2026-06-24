@@ -5,7 +5,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell, pushToast } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast, withBusy } from "../app-state.ts";
 import { PAPERS_FOLDER } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -165,17 +165,21 @@ export const App = defineComponent({
 
     async function openPaper(item: { path: string; name: string; title: string }): Promise<void> {
       galleryOpen.value = false;
-      let blob: Blob | null = null;
-      try { blob = await persistence().content.read(item.path); } catch { /* */ }
-      if (!blob) { showToast("读取失败(未登录/离线?)"); return; }
-      const docId = await contentDocId(await blob.arrayBuffer());
-      const cat = persistence().catalog;
-      if (!cat.get(docId)) cat.upsert(docId, { fileName: item.name, addedAt: nowMs() });
-      else cat.upsert(docId, { fileName: item.name });
-      cat.touch(docId);
-      currentDocId.value = docId; title.value = item.title; pos.value = null; outline.value = [];
-      const restore = cat.get(docId)?.position ?? null;
-      await v()?.loadBlob(blob, { key: docId, pos: restore });
+      // 全程全屏 busy：content.read（含云端 fetchMeta 检查 + clean 快进）→ loadBlob（渲染 + 粗调 + 精调）。
+      //   loadBlob 现在等到 pagesloaded 精调完才 resolve → 遮罩盖住「粗→精」那一跳和云检查延迟 → 不再闪。
+      await withBusy("打开…", async () => {
+        let blob: Blob | null = null;
+        try { blob = await persistence().content.read(item.path); } catch { /* */ }
+        if (!blob) { showToast("读取失败(未登录/离线?)"); return; }
+        const docId = await contentDocId(await blob.arrayBuffer());
+        const cat = persistence().catalog;
+        if (!cat.get(docId)) cat.upsert(docId, { fileName: item.name, addedAt: nowMs() });
+        else cat.upsert(docId, { fileName: item.name });
+        cat.touch(docId);
+        currentDocId.value = docId; title.value = item.title; pos.value = null; outline.value = [];
+        const restore = cat.get(docId)?.position ?? null;
+        await v()?.loadBlob(blob, { key: docId, pos: restore });
+      });
     }
     function onGalleryOpen(it: GalleryItem): void { void openPaper({ path: it.path, name: it.name, title: it.title }); }
 
@@ -313,6 +317,7 @@ export const App = defineComponent({
           <button class="jrp-btn" :class="confirmState.danger ? 'jrp-btn-danger' : 'jrp-btn-dark'" @click="confirmAnswer(true)">确定</button>
         </div>
       </div>
+      <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div></div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>
     </div>

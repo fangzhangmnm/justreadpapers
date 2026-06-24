@@ -110,8 +110,8 @@
   .jrp-gal-edit { flex: 1; box-sizing: border-box; margin: 4px 10px; padding: 7px 9px; border: 1px solid var(--line);
     border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 14px; }
   .jrp-newfolder-row { padding: 4px 10px; display: flex; }
-  .jrp-gal-file.cached::after { content: '·'; color: #2a8a6a; margin-left: 6px; }
-  .jrp-gal-file.pinned::after { content: '●'; color: var(--link); margin-left: 6px; font-size: 9px; vertical-align: middle; }
+  /* 已留作离线（keptOffline，offload 改名后单一态；旧 .cached/.pinned 双态已并）。 */
+  .jrp-gal-file.keptOffline::after { content: '●'; color: var(--link); margin-left: 6px; font-size: 9px; vertical-align: middle; }
   .jrp-gal-msg { padding: 16px; opacity: 0.5; font-size: 13px; }
   /* 目录/阅读控制抽屉：左侧弹出（与论文库同侧，互斥）。首行控制条，下方 TOC。 */
   .jrp-outline { position: absolute; left: 0; top: 0; bottom: 0; width: min(320px, 84vw); z-index: 9;
@@ -149,12 +149,19 @@
     background: rgba(44,38,32,0.92); color: #f4efe4; padding: 8px 16px; border-radius: 8px;
     font-size: 13px; z-index: 60; pointer-events: none; }
   .jrp-update { bottom: 64px; background: #2c2620; pointer-events: auto; cursor: pointer; }
+  /* 全屏 busy 遮罩(对齐 JRB「busy 永远全屏」):盖住打开论文的粗→精跳变 + 危险写操作,吞输入防误触 */
+  .jrp-busy { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.30); pointer-events: auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .jrp-busy-spin { width: 34px; height: 34px; border: 3px solid rgba(255,255,255,0.28);
+    border-top-color: #fff; border-radius: 50%; animation: jrp-spin 0.8s linear infinite; }
+  .jrp-busy-label { color: #f4efe4; font-size: 13px; }
+  @keyframes jrp-spin { to { transform: rotate(360deg); } }
   /* PDF 纸页保持白(夜间 = 深底白页,适合阅读) */
   .jrp-viewer .pdfViewer .page { margin: 10px auto; border: none; box-shadow: 0 1px 8px rgba(0,0,0,0.3); }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-612e69b4c033.mjs"></script>
+<script type="module" src="./dist/jrp-3df28c026bad.mjs"></script>
 </body>
 </html>
