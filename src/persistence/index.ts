@@ -96,6 +96,8 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
     async listGallery() {
       const prefix = cfg.PAPERS_FOLDER + "/";
       try {
+        // cloud-gone 收敛（安全子集 #43）：clean 孤儿→local-only（不删不 trash）。失败/离线/partial 自 no-op。
+        await store.reconcile().catch((e) => console.warn("[jrp] reconcile", e));
         const tree = await content.listTree();
         const files = tree.files
           .filter((f) => f.path.startsWith(prefix) && /\.pdf$/i.test(f.path))

@@ -34,7 +34,7 @@
 
 - **substrate**：编辑游标 + push-serialize（serialize/serialize2）+ save 合流。local-head 与它并列为两根有状态脊椎。
 - **cloud-sync**：CloudSync 层，拥 kv 持久 etag + 云操作（push/pull/fetchMeta/trash/…）。
-- 已抽并由 `create-store.ts` 组合：**seal**（加密透明）· **safe-resolve**（永不丢字节）· **push** · **freshness** · **delete** · **identity** · **trash** · **local-head** · **offload**（本地副本去留守卫）· **collection**。
+- 已抽并由 `create-store.ts` 组合：**seal**（加密透明）· **safe-resolve**（永不丢字节）· **push** · **freshness** · **delete** · **identity** · **trash** · **local-head** · **offload**（本地副本去留守卫）· **reconcile**（cloud-gone 安全收敛）· **collection**。
 
 ## 离线副本 —— keepOffline / offload（无 LRU、无 pin）
 
@@ -56,6 +56,12 @@ grep -rnE 'evict|offload|LRU|frecency|cacheCap|ensureRoom|storage\.estimate|reco
 
 store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-state.ts` 驱逐守卫 / `app-store.ts` cloud-gone 收敛 / `cloud-freshness.ts` 陈旧锁——吸进库后旧码喂不到输入、自然枯死）。
 
-## ⏸ 暂缓：cloud-gone / reconcile 收敛（pin，#43）
+## reconcile —— cloud-gone 安全收敛（#43，已落地安全子集）
 
-裂卡 E / cloud-move A→B 的 reconcile（list-fetch 时：clean-unpinned 缺→drop、pinned/dirty 缺→ghost、整列空→failed-fetch 守卫）**这轮不做**——WebPaint v227-228 那版（etag-tombstone）未真机验，且 JRP 已把它当 store 域从 app 层丢出。**钉死的安全 fallback**：旧设备发现 cloud-gone（曾 synced 但云端 path 没了）→ **变 local-only（留着、不 auto-delete）**——比自动删安全、可接受。等存在性模块单独立项再补。
+> 参考 WebPaint v227-228 etag-tombstone（GUID-free）**对齐移植**；只做不丢字节的那一半。`store.reconcile({activeName?})`，app 在 gallery list-fetch 时调（JRP 在 `persistence.listGallery`）。
+
+- **纯分类器** `classifyCloudGone(localNames, cloudNameSet, {seenBase, isDirty, authoritative, skip?})` → 返回该 demote 的 clean 孤儿（可穷举单测）。
+- **规则**：曾 synced（`seenBase!=null`）的 clean 本地、云端 path 没了 → **demote 成 local-only**（`cloud.clearState` + `head.forget` 清两轨 etag，**本地 blob 原地留着、不 trash、不 hardDelete**）。dirty 孤儿 → **留着 no-op**（未推字节只此一份）。从没 synced → 真本地文件、永不碰。在云端 → 不是孤儿。
+- **失败-fetch 守卫（命门）**：`authoritative = 在线 ∧ listAll.complete ∧ files 非空`，否则整个 no-op——partial 里「缺失」≠云端真没了；空列表多半未登录/网抖。绝不据 partial/空列表降级。
+- **K1**：可传 `activeName` 跳过当前打开的 doc（JRP 的 PDF 只读、demote 也无害，可不传）。
+- **暂不做（仍 ⏸）**：裂卡 E / cloud-move A→B 的 **ghost UI / split-card / 阅读位置 re-key**（WebPaint 那版未真机验）。本模块只保证「clean 孤儿安全降级、绝不丢」，不解决 move 产生的重复卡或丢绑定。

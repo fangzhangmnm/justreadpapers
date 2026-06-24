@@ -15,6 +15,7 @@ import { createDelete } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
+import { createReconcile } from "./reconcile.ts";
 import { createCollection, type Collection } from "./collection.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -77,6 +78,7 @@ export function createStore(config: StoreConfig) {
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
   const offloadMod = createOffload({ cloud, local, head, isOnline });
+  const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
@@ -190,9 +192,11 @@ export function createStore(config: StoreConfig) {
     ensureFolder: (path: string) => cloud.ensureFolder(path),
     newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", () => cloud.ensureFolder(path))),
     deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", () => cloud.removeFolder(path))),
-    // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放。
+    // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
+    reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),   // gallery list-fetch 时调：clean 孤儿→local-only（不删不 trash）
+
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
     listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）
     localKeys: () => local.appKeys(),     // 已缓存的应用文件名集合（gallery 批量判 cached）
