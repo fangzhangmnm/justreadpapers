@@ -132,6 +132,12 @@ export function createStore(config: StoreConfig) {
 
   // ── file 工厂（重载：isZip 编译期分流）──
   function makeRaw(name: string): RawFile {
+    const readLocal = async (): Promise<Blob | null> => {        // 读本地缓存字节 → 解壳出明文
+      const blob = await local.get(name);
+      if (!blob) return null;
+      const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
+      return await seal.unsealForRead(name, asBlob);
+    };
     return {
       async save(bytes) {
         head.recordEdit(name);
@@ -142,18 +148,17 @@ export function createStore(config: StoreConfig) {
         catch (e) { ui.reportError?.(e); }
       },
       async open() {
-        if (await local.exists(name)) {                          // 有本地副本（kept）→ freshness 检查后读本地
-          await fresh.open(name).catch((e) => ui.reportError?.(e));
-        } else if (keepOnOpen) {                                  // 持有模式（读者/编辑器）→ 拉云落本地（白得离线缓存）
-          await identity.acquire(name, { localName: name });
-        } else {                                                 // 过路模式（keepOnOpen:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
-          const pulled = await cloud.pull(name).catch((e) => { ui.reportError?.(e); return null; });
-          return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
+        if (await local.exists(name)) {                          // 有本地副本 → **本地优先**：立即返缓存，freshness 后台跑
+          void fresh.open(name).catch((e) => ui.reportError?.(e)); // 不阻塞、不重渲：云端真变了悄悄更新本地、下次开拿新
+          return readLocal();                                      //   （内容不可变的 PDF 几乎从不变；阻塞每次 open 等 fetchMeta 才是慢的根因）
         }
-        const blob = await local.get(name);
-        if (!blob) return null;
-        const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
-        return await seal.unsealForRead(name, asBlob);
+        if (keepOnOpen) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
+          await identity.acquire(name, { localName: name });
+          return readLocal();
+        }
+        // 本地没有、过路模式（keepOnOpen:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
+        const pulled = await cloud.pull(name).catch((e) => { ui.reportError?.(e); return null; });
+        return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
       async rename(newName) { await renameSF(name, newName); },
       async delete() { await delSF(name); },
