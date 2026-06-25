@@ -165,21 +165,29 @@ export const App = defineComponent({
 
     async function openPaper(item: { path: string; name: string; title: string }): Promise<void> {
       galleryOpen.value = false;
-      // 全程全屏 busy：content.read（含云端 fetchMeta 检查 + clean 快进）→ loadBlob（渲染 + 粗调 + 精调）。
-      //   loadBlob 现在等到 pagesloaded 精调完才 resolve → 遮罩盖住「粗→精」那一跳和云检查延迟 → 不再闪。
+      // [perf] 打开慢在哪：开 devtools console 看 [jrp][perf] 各步耗时（content.read=取字节+云端 etag 检查 / 算哈希 / 渲染定位）。
+      const P = (label: string, t0: number): void => console.info(`[jrp][perf] ${label}`, Math.round(performance.now() - t0), "ms");
+      const tAll = performance.now();
       await withBusy("打开…", async () => {
+        const t1 = performance.now();
         let blob: Blob | null = null;
         try { blob = await persistence().content.read(item.path); } catch { /* */ }
+        P("content.read(取字节+云端etag检查)", t1);
         if (!blob) { showToast("读取失败(未登录/离线?)"); return; }
+        const t2 = performance.now();
         const docId = await contentDocId(await blob.arrayBuffer());
+        P("contentDocId(算哈希)", t2);
         const cat = persistence().catalog;
         if (!cat.get(docId)) cat.upsert(docId, { fileName: item.name, addedAt: nowMs() });
         else cat.upsert(docId, { fileName: item.name });
         cat.touch(docId);
         currentDocId.value = docId; title.value = item.title; pos.value = null; outline.value = [];
         const restore = cat.get(docId)?.position ?? null;
+        const t3 = performance.now();
         await v()?.loadBlob(blob, { key: docId, pos: restore });
+        P("loadBlob(渲染+定位到pagesloaded)", t3);
       });
+      P("openPaper 总计", tAll);
     }
     function onGalleryOpen(it: GalleryItem): void { void openPaper({ path: it.path, name: it.name, title: it.title }); }
 
@@ -199,7 +207,12 @@ export const App = defineComponent({
       async function onSignedIn(): Promise<void> {
         if (resumed) return; resumed = true;
         // 整段 boot 续读裹一个遮罩：catalog.init(网络) → jumpscare→openPaper(自己也 withBusy，嵌套连续) → 不闪不双转。
-        await withBusy("打开…", async () => { await persistence().catalog.init(); jumpscare(); });
+        await withBusy("打开…", async () => {
+          const tc = performance.now();
+          await persistence().catalog.init();
+          console.info("[jrp][perf] catalog.init(阅读态同步)", Math.round(performance.now() - tc), "ms");
+          jumpscare();
+        });
       }
       const acctName = (st: any): string => (st && st.account && (st.account.username || st.account.name)) || "";
       auth.onAuthChanged((st: any) => {

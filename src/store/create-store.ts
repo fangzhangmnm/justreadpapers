@@ -148,9 +148,9 @@ export function createStore(config: StoreConfig) {
         catch (e) { ui.reportError?.(e); }
       },
       async open() {
-        if (await local.exists(name)) {                          // 有本地副本 → **本地优先**：立即返缓存，freshness 后台跑
-          void fresh.open(name).catch((e) => ui.reportError?.(e)); // 不阻塞、不重渲：云端真变了悄悄更新本地、下次开拿新
-          return readLocal();                                      //   （内容不可变的 PDF 几乎从不变；阻塞每次 open 等 fetchMeta 才是慢的根因）
+        if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
+          await fresh.open(name).catch((e) => ui.reportError?.(e)); //   不立即返缓存——否则后台发现云端变了再采纳=闪一下（用户纠正）。代价=一次轻量 fetchMeta。
+          return readLocal();
         }
         if (keepOnOpen) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
           await identity.acquire(name, { localName: name });
