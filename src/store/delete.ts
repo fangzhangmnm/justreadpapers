@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // delete（深模块）—— 删除 = move-aside（绝不硬删脏字节）。单一职责 = 三态删除 + 离线删队列：
 //   三态：仅本地 / 仅云端 / 两者（两者→云端进 .trash + 本地干净副本直删，不留双份；本地脏→降级 local-only）。

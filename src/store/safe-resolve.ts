@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // safe-resolve（深模块）—— **永不丢字节**地化解本地↔云端分歧。单一职责 = 那条不可重排的顺序：
 //   备份先于覆盖(A4/A10) · 采纳前校验真容器(N2,挡 captive-portal HTML) · 采纳后置 etag(R1) ·
@@ -88,7 +88,7 @@ export function createSafeResolve(cfg: SafeResolveCfg): SafeResolve {
     return { backedUp: r.backedUp };
   }
 
-  // 3 选项派发（STORE.md §7）：takeCloud=safePull · keepMine=weakOverride · cancel=什么都不动（留 dirty）。
+  // 3 选项派发（README.md §7）：takeCloud=safePull · keepMine=weakOverride · cancel=什么都不动（留 dirty）。
   async function resolveConflict(name: string, choice: ResolveChoice, ctx: { bytes?: Bytes | null; adopt?: AdoptFn } = {}) {
     if (choice === "takeCloud") {
       const r = await safePull(name, { adopt: ctx.adopt });

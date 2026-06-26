@@ -1,11 +1,11 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // seal（深模块）—— at-rest 加密**透明**的 router。单一职责 = "encode 永出明文，写前按 name 的
 //   at-rest 加密态包壳、读后解壳，密码非交互"。容器格式的重活在 crypto-container（另一模块）；
 //   seal 只管**路由 + 非交互密码**，crypto 原语经 seam 注入 → 不碰真 7z 也能测路由。
 //
 // 红线：明文绝不落盘（加密文件 + 无密码 → 写路径**响亮抛 LOCKED**，绝不静默存明文）。
-//   读路径锁定（无/错密码）→ 返 null（**不弹窗**；解锁循环是 UI 在 busy 外的事，见 STORE.md §7）。
+//   读路径锁定（无/错密码）→ 返 null（**不弹窗**；解锁循环是 UI 在 busy 外的事，见 README.md §7）。
 import { toU8 } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
 

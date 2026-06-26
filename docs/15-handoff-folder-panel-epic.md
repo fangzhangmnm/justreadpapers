@@ -1,6 +1,6 @@
 # Handoff —— folder-panel epic（写于 store-drift 事故之后）
 
-> as-of 2026-06-23。接手前先读：本文 + `docs/14-folder-panel-epic.md`（设计 SSoT）+ `src/store/STORE.md`（库手册）。
+> as-of 2026-06-23。接手前先读：本文 + `docs/14-folder-panel-epic.md`（设计 SSoT）+ `src/store/README.md`（库手册）。
 > 信任顺序：代码现状 > journals 人类原话 > 本文。
 
 ## epic 进度（在 dev 上，未真机验；commit 在 main/origin）
@@ -10,7 +10,7 @@
 - **P1 已上 dev**：回收站视图（恢复/永久删/清空，**in-app confirm，绝不 system confirm**）+ 跨夹「移动到…」folder picker（非拖拽）。content 加 listTrash/restore/purge/emptyTrash。
 - **P2 已上 dev（⚠ 手搓，待审计）**：cache/uncache —— `evict.ts`+`pin-set.ts` + file.pin/unpin/evict/isCached/isPinned + store.localKeys + LocalCache.appKeys。gallery ⋯缓存/取消缓存 + cached/pinned badge。8 例对抗测试。**← 这套是 drift 风险面，用户已经开新agent解决，如果缺少合适api请escalate，进入api design phase。**
 - **P3 已上 dev**：cloud-sync.listBackup + content.listBackup；gallery **trash+backup 合并成「恢复箱」**（共享 bin 渲染 + 行原语）。
-- **STORE.md 已清理**：回归 tutorial + API overview，删掉细节碎念，规范术语（STORE.md 不是反馈/历史日志，要对人类透明、不堆黑话）。
+- **README.md 已清理**：回归 tutorial + API overview，删掉细节碎念，规范术语（README.md 不是反馈/历史日志，要对人类透明、不堆黑话）。
 
 剩余：
 - **P4 全套加密（最大、红线最密）**：vendor 7z-wasm（1.6MB）+ zip codec + `configureCryptoCodec` 注入（JRP 现在 codec 从未注入 → 加密 inert）+ cloud-sync 扩展名翻转(.zip) + per-file encrypt/decrypt（**对接 JRP push/local-head seam，移植 WebPaint `store.ts:891-947` 的 encryptFile/decryptFile/_swapBytes，不照抄**）+ 密码 in-app sheet（**必须在 busy 遮罩外**，否则死锁）。seal.ts/crypto-container.ts 已健康移植，只差 codec 注入 + transform + UI。**这是 escalate-human + reconcile-canonical 级，走 pwa-cloud-store。** 用户已拍板"这轮顺手做全套"，但鉴于刚出 drift 事故，接手前重新和用户确认切法。
@@ -23,7 +23,7 @@
 - 真机待验清单：P1–P3 的回收站/备份箱/移动/缓存取消缓存；以及更早的续读修复、thumbnails、cloud 账号 popup。
 
 ## 规范 / 风格（用户强调）
-- **STORE.md = tutorial + API overview**，对人类透明，**不堆细节、不记反馈、不用 session 黑话**（强杀/续读/surface/红线代号/恢复箱…用规范术语）。
+- **README.md = tutorial + API overview**，对人类透明，**不堆细节、不记反馈、不用 session 黑话**（强杀/续读/surface/红线代号/恢复箱…用规范术语）。
 - **无 system dialog**（alert/prompt/confirm）；用 in-app sheet。
 - 中文 UI；commit/push dev 是常规，**prod 必问**；worktree 改完 merge 回 main。
 

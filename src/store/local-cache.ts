@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md。store 内部模块,**不要从 app 直接 import**——app 只走 createStore()。
+// ⚠ 使用前必读 README.md。store 内部模块,**不要从 app 直接 import**——app 只走 createStore()。
 //
 // LocalCache —— store 的本地持久层(离线缓存 + 秒开)。**内容无关、零 ORA 知识**:
 //   只存/取不透明 binary blob(ora/glb/pdf/txt 一律),thumbnail 由 app 经 hint.thumb 供——

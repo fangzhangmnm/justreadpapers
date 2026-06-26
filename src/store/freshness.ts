@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // freshness（深模块）—— 进入/事件时的"云端动没动 → clean 快进 / dirty surface"。单一职责 =
 //   freshness gate（ADR-0016）：比 seenBase vs 云端 etag；clean 且动过 → 静默无损快进；

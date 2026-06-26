@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // identity（深模块）—— 改身份：rename / saveAs / acquire。单一职责 = 安全的身份变更：
 //   phantom-path 红线：**本地先存新名再删旧名**（绝不先删）。

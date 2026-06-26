@@ -7,7 +7,7 @@
 ## 风险分区（铁律）
 - **app UI/胶水**（trash/backup 视图、move picker、cache 按钮、模块抽取）= greenfield，大胆做。
 - **store/引擎红线改**（evict/pin、listBackup、加密 codec+transform）= 改前 escalate（本文=escalate）+ 稳后
-  reconcile 回 canonical（注意：canonical 仍未实现，现行=兄弟互拷，见 STORE.md 复用模型）。
+  reconcile 回 canonical（注意：canonical 仍未实现，现行=兄弟互拷，见 `src/store/README.md` 复用模型）。
 
 ## 可复用模块：分层窄接口（emit 意图、宿主执行、零 store）
 | 层 | 操作 | 谁要 |

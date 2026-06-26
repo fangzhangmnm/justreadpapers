@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + DATA SAFETY GUIDELINE.md。store 内部深模块——app 经 createStore 的 store.reconcile。
+// ⚠ 使用前必读 README.md + DATA SAFETY GUIDELINE.md。store 内部深模块——app 经 createStore 的 store.reconcile。
 //
 // reconcile（深模块）—— cloud-gone 收敛的**安全子集**（#43 用户 pin 的 fallback；参考 WebPaint v227-228
 //   etag-tombstone、GUID-free 实现，对齐移植不发明）。只做一件事，且**绝不丢字节**：

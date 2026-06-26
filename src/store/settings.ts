@@ -1,11 +1,11 @@
-// ⚠ 使用前必读 STORE.md。app 不直接 import 本文件——经 createStore 的 store.localSettings /
+// ⚠ 使用前必读 README.md。app 不直接 import 本文件——经 createStore 的 store.localSettings /
 //   store.syncedSettings 拿。
 //
-// 两种设置（STORE.md §4）：
+// 两种设置（README.md §4）：
 //   localSettings  —— 设备本地 KV（over 注入的 Kv，不同步；theme/zoom/spread 等设备独立项）。
 //   syncedSettings —— 跨设备 KV，**内部就是一个 collection、每个 key 当一个 item**：
 //                     per-key last-write-wins 是 §3 per-item LWW 白送的，没有第二套合并逻辑。
-// 两者 get 都**不给 default**（STORE.md §4）：默认值收在 app 一处 SSoT，别每次取值各写各的。
+// 两者 get 都**不给 default**（README.md §4）：默认值收在 app 一处 SSoT，别每次取值各写各的。
 import type { Kv } from "./types.ts";
 import type { Collection } from "./collection.ts";
 

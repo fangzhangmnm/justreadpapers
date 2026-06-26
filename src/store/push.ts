@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // push（深模块）—— 串行 + If-Match + 重试 + 冲突 surface 的推。单一职责 = 同步**编排**：
 //   它自己不持谱系/不解加密/不化解冲突，而是**编排**三个深模块：

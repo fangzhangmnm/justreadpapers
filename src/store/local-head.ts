@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // local-head（深模块）—— 追踪「**本 tab 对每个文件，相对云端站在哪**」。
 //   = git 的 HEAD(_base 看到的云 tip) + merge-base(_parent 未推枝分叉自哪) + working-tree-dirty 三合一。

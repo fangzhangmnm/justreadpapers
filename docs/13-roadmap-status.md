@@ -8,7 +8,7 @@
 不重复的权威源（按 path 引，不抄进来）：
 - **产品北极星**：`journals/20260518 proposal.md` + `journals/cached feedback JRP.md`（AI 只读不写）。
 - **master 架构 + 阶段 + parked**：`PLAN.md`（§5 阶段、§6 parked 下载/arxiv、§4 开放问题）。
-- **store 库**：`src/store/STORE.md`（新 API SSoT）、`src/store/CONTEXT.md`（domain 术语）、`src/store/OLD-ENGINE.md`（旧引擎全貌）、`docs/reports/architecture-review-*.html`（拆分报告）。
+- **store 库**：`src/store/README.md`（新 API SSoT）、`src/store/CONTEXT.md`（domain 术语）、`src/store/OLD-ENGINE.md`（旧引擎全貌）、`docs/reports/architecture-review-*.html`（拆分报告）。
 - spec 算法/UX：`docs/00–12`（cross-device-position / fit-width-zoom / pdfjs-gotchas / session-sync-throttle …）。
 
 ---
@@ -30,7 +30,7 @@
 ## store 大改 detour —— 已完成（2026-06-22，`7ca3e50` 已 merge main + push dev）
 
 起因：发现 JRP 的 persistence **深 import `createCloudSync`/`createFolderStore`** 绕过了 store 库（违反红线②"论文必须和 ora 走同一条路"）。
-做法：把 1050 行 `store.ts` 神文件按**单一职责**拆成 **10 个带测深模块** + 薄 `createStore` 组合根 + 封死绕口。详见 `STORE.md`/`CONTEXT.md`/`OLD-ENGINE.md` 和该批 commit（`store 候选1..5`）。结果：
+做法：把 1050 行 `store.ts` 神文件按**单一职责**拆成 **10 个带测深模块** + 薄 `createStore` 组合根 + 封死绕口。详见 `src/store/` 下 `README.md`/`CONTEXT.md`/`OLD-ENGINE.md` 和该批 commit（`store 候选1..5`）。结果：
 - 深模块：`local-head`(W2 谱系/bypass) · `safe-resolve`(永不丢字节) · `seal`(加密透明) · `push` · `freshness` · `delete` · `identity` · `trash` · `collection` · `settings`。**guts 逻辑一行没改，只搬家+补测**。红线测试 **0→41**。
 - 唯一入口 `createStore({provider, ui, …})`（Model B：ui 注入 busy/askPassword/resolveConflict/reportError）。barrel 封口 + `build.sh` deep-import lint 强制 app 不碰 guts。
 - JRP 全脱绕：catalog→`store.collection`、content→`store.file`（**白得离线缓存**）、settings→`store.localSettings`。lint 确认零违规。
@@ -57,7 +57,7 @@ user 真机测出"没续上上次页码"。**根因（user 钉的"await default 
    - **需 CORS proxy**——**那时再建**，且守 anti-abandonware（ADR-0006）：proxy 挂了 app+数据仍完好，proxy 只是 autofill 便利。
 
 ## 遗留 / 已知（有意推后）
-- **加密 / `ZipFile.setPreview` 是 `⚠TODO`**（需 7z 注入，STORE.md §1/§5.0）——JRP 不加密用不到；WebPaint 接库时再补实现。
+- **加密 / `ZipFile.setPreview` 是 `⚠TODO`**（需 `src/store/README.md` §1/§5.0 的 7z 加密）——JRP 不加密用不到；WebPaint 接库时再补实现。
 - **settings 前缀**从旧 `jrp.set:` 换成库的 `settings:` → 设备本地项（zoom/spread）会重置一次，无数据风险。
 - **worktree `jrp-ts-rewrite`** 已全 merge 进 main、冗余，可删。
 - **store backprop**：本次重构在 JRP fork 完成；按 baked-copy 模型（`shared-lib-workflow`），稳定后要 merge 回 WebPaint/canonical（`MyPWAPatterns/sync-store`）——见 OLD-ENGINE.md 的 GAP 表。

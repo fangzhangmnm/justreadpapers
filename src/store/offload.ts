@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + DATA SAFETY GUIDELINE.md。store 内部深模块——app 经 createStore 的 file.offload。
+// ⚠ 使用前必读 README.md + DATA SAFETY GUIDELINE.md。store 内部深模块——app 经 createStore 的 file.offload。
 //
 // offload（深模块）—— 移除本地副本（offload ≠ delete：只丢本地，云端不动）。语义对齐 WebPaint unload。
 //   只在「本地是云端某完整版的可重取 shadow」时合法 → hardDelete（不进 local trash，clean 可重下）。

@@ -1,7 +1,7 @@
-// ⚠ 这是库的唯一入口。接库必读同目录 STORE.md + CONTEXT.md。
+// ⚠ 这是库的唯一入口。接库必读同目录 README.md + CONTEXT.md。
 //
 // createStore —— 薄组合根：provider → 库内造 cloud/local/kv/脊椎 → 装配 10 个深模块 →
-//   暴露 STORE.md 的面（file / collection / localSettings / syncedSettings / list）。
+//   暴露 README.md 的面（file / collection / localSettings / syncedSettings / list）。
 //   红线全在各深模块内 enforce；这里只接线 + 把 ui bundle 映射到各 flow 的回调。
 import { toU8, createSubstrate } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
@@ -22,7 +22,7 @@ import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache } from "./local-cache.ts";
 
-// ── ui bundle（Model B，STORE.md §7）：store 在决策点回调进来 + await ──
+// ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
   busy: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
   askPassword?: (ctx: { name: string; reason: "open" | "save" | "unlock" }) => Promise<string | null>;
@@ -44,7 +44,7 @@ export interface StoreConfig {
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
 }
 
-// ── 文件对象（STORE.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
+// ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
 export interface RawFile {
   save(bytes: Bytes | Blob): Promise<void>;
   open(): Promise<Blob | null>;
@@ -178,7 +178,7 @@ export function createStore(config: StoreConfig) {
     const raw = makeRaw(name);
     if (!opts.isZip) return raw;
     // ZipFile：previewBlob 作 zip entry（⚠TODO：需 zip 注入；本版 setPreview/getPreview 暂未实现）。
-    const notYet = () => { throw new Error("ZipFile.preview ⚠TODO：zip 预览管线尚未实现（STORE.md §2，待 zip 接入）"); };
+    const notYet = () => { throw new Error("ZipFile.preview ⚠TODO：zip 预览管线尚未实现（README.md §2，待 zip 接入）"); };
     return Object.assign(raw, { setPreview: async (_b: Blob) => notYet(), getPreview: async () => notYet() }) as ZipFile;
   }
 

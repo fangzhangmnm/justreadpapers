@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 STORE.md + CONTEXT.md。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
 // trash（深模块）—— 回收站生命周期：restore / purge / emptyTrash。单一职责 = .trash 的恢复与彻底删：
 //   restore：本地先恢复（撞名自动 (2)）→ 云端按同名恢复；采纳恢复出的云 item etag（move→新 etag）。

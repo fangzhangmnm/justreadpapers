@@ -1,6 +1,6 @@
 # 旧引擎（store.ts）seam + API 全貌 —— 重构前的 escalation 底稿
 
-> 目的（按 #79）：**不做 facade**。要把旧引擎正经重构成 STORE.md 那套新 API，先把旧版本的**注入 seam** 和**对外 API interface** 摊开给人看清，再决定怎么切。
+> 目的（按 #79）：**不做 facade**。要把旧引擎正经重构成 README.md 那套新 API，先把旧版本的**注入 seam** 和**对外 API interface** 摊开给人看清，再决定怎么切。
 > 来源：通读 `store.ts`（~1050 行，2026-06-21）。这是 WebPaint baked、身经百战的 work-file 同步引擎，红线全在库内 enforce。
 
 ---
@@ -24,7 +24,7 @@
 | `validateAdopt` | `(blob)=>bool?` | 采纳云端字节落盘**前**校验是真容器（挡 captive-portal HTML 覆盖好本地）。store 格式盲→逻辑 app 给。 |
 | `maxAttempts`/`backoffMs`/`sleep` | | push 重试退避参数。 |
 
-**观察**：`busy` / `crypt.getPassword` / `validateAdopt` / `crypt.makePeek` —— 这四个就是新 STORE.md 里 Model B `ui` 想收编的"UI/app 决策 seam"，现在散在构造 deps + 各 flow 的 opts 里。
+**观察**：`busy` / `crypt.getPassword` / `validateAdopt` / `crypt.makePeek` —— 这四个就是新 README.md 里 Model B `ui` 想收编的"UI/app 决策 seam"，现在散在构造 deps + 各 flow 的 opts 里。
 
 ---
 
@@ -41,7 +41,7 @@
 - **`save(name, {encode, hint})`** / **`load(name)`**：本地落盘/读取，自动包/解壳
 - **`acquire(cloudName, opts)`**：`localName` / `adopt` / `busy`（首取云→本地，无冲突）
 
-**冲突决策回调**：`onConflict`（push 撞 412）和 `onNewer`（open 发现云端更新）返回 `ConflictChoice = "keep"|"pull"|"branch"|"weak-override"|"rename"`。**store 调它拿选择，然后 `_resolveConflict` 在库内执行后果**（pull/branch/weak-override 都在库内做）——这已经是 Model B 的形状，只是回调名/选项跟新 STORE.md 的 `resolveConflict`+`{keepMine,takeCloud,cancel}` 不一致。
+**冲突决策回调**：`onConflict`（push 撞 412）和 `onNewer`（open 发现云端更新）返回 `ConflictChoice = "keep"|"pull"|"branch"|"weak-override"|"rename"`。**store 调它拿选择，然后 `_resolveConflict` 在库内执行后果**（pull/branch/weak-override 都在库内做）——这已经是 Model B 的形状，只是回调名/选项跟新 README.md 的 `resolveConflict`+`{keepMine,takeCloud,cancel}` 不一致。
 
 ---
 
@@ -90,9 +90,9 @@
 
 ---
 
-## E. 旧 API ↔ 新 STORE.md 的 GAP（重构要弥的缝）
+## E. 旧 API ↔ 新 README.md 的 GAP（重构要弥的缝）
 
-| 维度 | 旧引擎（现状） | 新 STORE.md（目标） |
+| 维度 | 旧引擎（现状） | 新 README.md（目标） |
 |---|---|---|
 | 入口 | `createStore({cloud, local, kv, busy, crypt, …})`——收**已造好的** cloud/local | `createStore({provider, ui, sevenZip?, …})`——收 **provider**，cloud/local 库内自造 |
 | UI 决策 seam | 散在 deps(`busy`)+各 flow opts(`onConflict`/`onNewer`/`confirm`/…) | 统一 `ui = {busy, askPassword, resolveConflict, reportError}` |

@@ -1,6 +1,6 @@
-// ⚠ 使用前必读 STORE.md。app 不直接 import 本文件——经 createStore 的 store.collection 拿。
+// ⚠ 使用前必读 README.md。app 不直接 import 本文件——经 createStore 的 store.collection 拿。
 //
-// GENERIC — Collection store facade（STORE.md §3）。一份同步 JSON 装多个**原子** item。
+// GENERIC — Collection store facade（README.md §3）。一份同步 JSON 装多个**原子** item。
 // 自拥内存 envelope（不像 folder-store 让 app 注入 snapshot()/onResult）；item = 普通 JSON 对象。
 // 信封 { id, uat, ...payload } 由本模块强制：id 类型上必填、uat **内部盖戳**（app 既传不进也读不到）、
 //   其余字段 = opaque payload。合并复用 folder-merge（per-item uat-LWW，CRDT-lite，零冲突）；

@@ -1,7 +1,7 @@
 # sync-store —— domain glossary（架构用语 SSoT）
 
 > 这个文件给 store 引擎里的概念**命名**。架构评审/重构按这里的词走，别漂成 "service / handler / manager"。
-> 红线设计见 STORE.md（新 API SSoT）+ OLD-ENGINE.md（旧引擎 seam）。
+> 红线设计见 README.md（新 API SSoT）+ OLD-ENGINE.md（旧引擎 seam）。
 
 ## 版本谱系（git 心智模型）
 
@@ -22,7 +22,7 @@
 - **`recordEdit(name)` 是唯一标脏入口**：原子地 set dirty + `_parent ← _base` → **dirty-without-parent 不可表示**（bypass 结构性消除，不是事后绊线）。
 - **seenBase 回退**：`_base` 缺失时回退读 cloud kv etag——**仅**用于 open/refresh 的"云端动没动"比较（非破坏性），**永不**作 dirty 的 If-Match。local-head 是**唯一**碰这个回退的地方（两条 etag 轨道唯一接触点，可审计）。
 - **两条 etag 轨道分开**：local-head 拥 per-tab `_base`/`_parent`；cloud-sync 拥 kv 持久 etag。只在 open/adopt 单向 seed（kv→`_base`），绝不反向。
-- **藏在接口后、app 永不 import**：local-head 是 store 的**内部脊椎**，不在 STORE.md 的 app 面（file/collection/...）里露出；消费它的只有库内深模块（push / freshness / delete / identity / offload / safe-resolve），各自只调它的 8 个方法（`ifMatchFor` / `seenBase` / `isDirty` / `recordEdit` / `markSeen` / `markSynced` / `onPushed` / `forget`）。**它就是最底的版本谱系脊椎，上面没有另一层。**（注：JRP 才把它从 WebPaint 的 `store.ts` inline 抽出来；WebPaint 仍 inline，未来 adapt 回去时以本模块为准。）
+- **藏在接口后、app 永不 import**：local-head 是 store 的**内部脊椎**，不在 README.md 的 app 面（file/collection/...）里露出；消费它的只有库内深模块（push / freshness / delete / identity / offload / safe-resolve），各自只调它的 8 个方法（`ifMatchFor` / `seenBase` / `isDirty` / `recordEdit` / `markSeen` / `markSynced` / `onPushed` / `forget`）。**它就是最底的版本谱系脊椎，上面没有另一层。**（注：JRP 才把它从 WebPaint 的 `store.ts` inline 抽出来；WebPaint 仍 inline，未来 adapt 回去时以本模块为准。）
 
 ## 红线优先级（取舍时按此排）
 
