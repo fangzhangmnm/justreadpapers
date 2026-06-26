@@ -90,6 +90,16 @@
     background: var(--menu-bg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
     box-shadow: 0 6px 24px rgba(0,0,0,0.22); padding: 4px; }
   .jrp-acct-info { padding: 8px 14px; font-size: 12px; opacity: 0.6; }
+  /* 拖拽上传提示:整屏 fixed 蒙层(仅视觉,pointer-events:none 让 drag 事件落到 window 监听)。 */
+  .jrp-drop-overlay { position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.42); backdrop-filter: blur(1px); }
+  .jrp-drop-card { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 28px 40px; border-radius: 16px; border: 2px dashed var(--link);
+    background: var(--bg); color: var(--fg); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+  .jrp-drop-card svg { width: 40px; height: 40px; color: var(--link); }
+  .jrp-drop-title { font-size: 16px; font-weight: 600; }
+  .jrp-drop-hint { font-size: 12px; opacity: 0.6; }
   .jrp-crumbs { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--line2); }
   .jrp-crumbs a { cursor: pointer; color: var(--link); }
   .jrp-crumb-sep { opacity: 0.4; margin: 0 4px; }
@@ -162,6 +172,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-bf710afdcb79.mjs"></script>
+<script type="module" src="./dist/jrp-70217a6dd764.mjs"></script>
 </body>
 </html>

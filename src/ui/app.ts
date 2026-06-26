@@ -121,15 +121,20 @@ export const App = defineComponent({
     }
     function onGalUpload(p: { folder: string; files: File[] }): void {
       const base = p.folder ? `${PAPERS_FOLDER}/${p.folder}` : PAPERS_FOLDER;
+      let last: { path: string; name: string; title: string } | null = null;   // 最后一份成功的，上传完自动打开(抄旧版 spec)
       void withGalleryBusy(async () => {
         let ok = 0; const failed: string[] = [];
         for (const f of p.files) {
-          const nm = f.name.replace(/[\\/:*?"<>|]/g, "").replace(/\.pdf$/i, "").trim() + ".pdf";
-          try { await persistence().content.upload(`${base}/${nm}`, f); ok++; } catch { failed.push(nm); }
+          const stem = f.name.replace(/[\\/:*?"<>|]/g, "").replace(/\.pdf$/i, "").trim();
+          const nm = stem + ".pdf";
+          try {
+            await persistence().content.upload(`${base}/${nm}`, f); ok++;
+            last = { path: `${base}/${nm}`, name: p.folder ? `${p.folder}/${nm}` : nm, title: stem };
+          } catch { failed.push(nm); }
         }
         if (!ok) throw new Error("none");
         showToast(failed.length ? `上传 ${ok} 个，${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
-      }, "", "上传失败(同名/未登录/离线?)");
+      }, "", "上传失败(同名/未登录/离线?)").then(() => { if (last) void openPaper(last); });
     }
     function onGalDeleteFolder(rel: string): void {
       // store removeFolder：非空→抛(catch 提示)；不存在→返 false(已没了,也算成功)。
