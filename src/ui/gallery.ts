@@ -4,7 +4,7 @@
 //   操作 emit 意图(open/rename/trash/newfolder/upload/signin/signout/refresh),宿主执行(碰 store)后回灌 props。
 // 导航 = 面包屑钻入式(全家共识,扁平路径+切片,零 tree-sync bug)。无 expand/collapse 树。
 // 滚动:.jrp-gallery 固定高 flex 列,唯一滚动体 = .jrp-gal-list(flex:1 overflow),head/crumbs 固定不 grow。
-import { defineComponent, ref, computed, onMounted, onUnmounted } from "../vendor/vue/vue.esm-browser.prod.js";
+import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { sliceFolder, breadcrumb, pathJoin, pathFolder } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
@@ -14,13 +14,6 @@ interface SetupCtx { emit: (e: string, payload?: unknown) => void; }
 // 通用文件名清洗(剥非法字符)——文件系统卫生,非 app-specific(扩展名/路径由宿主补)。
 function sanitizeName(s: string): string {
   return s.replace(/[\\/:*?"<>|]/g, "").replace(/^\.+/, "").replace(/\s+/g, " ").trim().slice(0, 200);
-}
-
-// 拖拽中是否带文件(而非纯文本/链接)。dragover 期 dt.files 为空,只能查 types。
-function dtHasFiles(dt: DataTransfer | null): boolean {
-  if (!dt || !dt.types) return false;
-  for (const t of dt.types) if (t === "Files" || t === "application/x-moz-file") return true;
-  return false;
 }
 
 export const Gallery = defineComponent({
@@ -34,7 +27,7 @@ export const Gallery = defineComponent({
     trash: { type: Array, default: () => [] as { cloudId: string; name: string }[] },    // 回收站项（宿主灌）
     backup: { type: Array, default: () => [] as { cloudId: string; name: string }[] },   // 备份箱项（宿主灌）
   },
-  emits: ["open", "close", "toast", "rename", "move", "trash", "keepoffline", "offload", "restore", "purge", "emptytrash", "loadbin", "newfolder", "deletefolder", "upload", "signin", "signout", "refresh"],
+  emits: ["open", "close", "toast", "rename", "move", "trash", "keepoffline", "offload", "restore", "purge", "emptytrash", "loadbin", "newfolder", "deletefolder", "upload", "folderchange", "signin", "signout", "refresh"],
   setup(props: any, ctx: SetupCtx) {
     const currentFolder = ref("");
     const menuFor = ref<string | null>(null);     // ⋯ 菜单开在哪个 item.path
@@ -109,54 +102,22 @@ export const Gallery = defineComponent({
       const clean = sanitizeName(newFolderVal.value);
       if (clean) ctx.emit("newfolder", { parent: currentFolder.value, name: clean });
     }
-    function emitUpload(files: File[]): void {
-      if (files.length) ctx.emit("upload", { folder: currentFolder.value, files });
-    }
     function onUpload(e: Event): void {
       const input = e.target as HTMLInputElement;
       const files = input.files ? Array.from(input.files) : [];
       input.value = "";   // 清空,允许再传同一文件
-      emitUpload(files);
+      if (files.length) ctx.emit("upload", { folder: currentFolder.value, files });
     }
 
-    // 拖拽上传(抄旧版 spec):整窗监听,dragenter 计数防抖(进子元素也 fire dragleave),
-    // 落到当前文件夹、emit 同一 upload 意图(宿主上传完打开最后一份)。仅登录 + 文件视图可拖。
-    const dragActive = ref(false);
-    let dragDepth = 0;
-    const canDrop = (): boolean => props.signedIn && view.value === "files";
-    function onDragEnter(e: DragEvent): void {
-      if (!canDrop() || !dtHasFiles(e.dataTransfer)) return;
-      e.preventDefault(); dragDepth += 1; dragActive.value = true;
-    }
-    function onDragOver(e: DragEvent): void {
-      if (!canDrop() || !dtHasFiles(e.dataTransfer)) return;
-      e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-    }
-    function onDragLeave(e: DragEvent): void {
-      if (!dtHasFiles(e.dataTransfer)) return;
-      dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) dragActive.value = false;
-    }
-    function onDrop(e: DragEvent): void {
-      if (!canDrop() || !dtHasFiles(e.dataTransfer)) return;
-      e.preventDefault(); dragDepth = 0; dragActive.value = false;
-      const files = Array.from(e.dataTransfer?.files || []).filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-      if (!files.length) { ctx.emit("toast", "不是 PDF，忽略"); return; }
-      emitUpload(files);
-    }
+    // 当前文件夹汇报给宿主:拖拽上传由 app 层接管(阅读模式也能拖),需知道往哪个文件夹落。
+    // 仅文件视图有意义(回收站/备份箱不收上传);非文件视图汇报 ""(宿主回退到根)。
+    watch([currentFolder, view], () => ctx.emit("folderchange", view.value === "files" ? currentFolder.value : ""), { immediate: true });
 
-    onMounted(() => {
-      ctx.emit("refresh"); window.addEventListener("online", syncOnline); window.addEventListener("offline", syncOnline);   // 挂载即请宿主灌数据 + 监听在线态
-      window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver);
-      window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
-    });
-    onUnmounted(() => {
-      window.removeEventListener("online", syncOnline); window.removeEventListener("offline", syncOnline);
-      window.removeEventListener("dragenter", onDragEnter); window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop);
-    });
+    onMounted(() => { ctx.emit("refresh"); window.addEventListener("online", syncOnline); window.addEventListener("offline", syncOnline); });   // 挂载即请宿主灌数据 + 监听在线态
+    onUnmounted(() => { window.removeEventListener("online", syncOnline); window.removeEventListener("offline", syncOnline); });
 
     return {
-      currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal, view, moveFor, moveTargets, binItems, binTitle, dragActive,
+      currentFolder, sliced, crumbs, menuFor, editing, editVal, newFolderMode, newFolderVal, view, moveFor, moveTargets, binItems, binTitle,
       cloudState, accountOpen, accountInfo, toggleAccount, doSignin, doSignout, doRefresh, toggleFolderMenu,
       go, enter, toggleMenu, startRename, cancelRename, commitRename, doTrash, doKeepOffline, doOffload, deleteFolder, openNewFolder, commitNewFolder, onUpload,
       openMove, pickMove, cancelMove: (): void => { moveFor.value = null; }, setView, doRestore, doPurge, doEmptyTrash,
@@ -167,13 +128,6 @@ export const Gallery = defineComponent({
   },
   template: `
     <aside class="jrp-gallery">
-      <div class="jrp-drop-overlay" v-if="dragActive">
-        <div class="jrp-drop-card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <div class="jrp-drop-title">松手即上传</div>
-          <div class="jrp-drop-hint">PDF 进当前文件夹，并打开最后一份</div>
-        </div>
-      </div>
       <div class="jrp-gal-head">
         <template v-if="view !== 'files'">
           <button class="jrp-icon" @click="setView('files')" title="返回图库"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>

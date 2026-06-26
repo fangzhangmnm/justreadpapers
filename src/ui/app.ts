@@ -11,6 +11,12 @@ import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// 拖拽中是否带文件(而非纯文本/链接)。dragover 期 dt.files 为空,只能查 types。
+function dtHasFiles(dt: DataTransfer | null): boolean {
+  if (!dt || !dt.types) return false;
+  for (const t of dt.types) if (t === "Files" || t === "application/x-moz-file") return true;
+  return false;
+}
 interface OutlineRow { title: string; dest: unknown; depth: number; }
 function flattenOutline(items: any[], depth: number, out: OutlineRow[]): void {
   for (const it of items || []) {
@@ -29,6 +35,7 @@ export const App = defineComponent({
     const outline = ref<any[]>([]);
     const menuOpen = ref(false);
     const currentDocId = ref<string | null>(null);
+    const currentPaperFolder = ref("");   // 当前打开论文所在文件夹（相对 papers 根）；阅读模式拖拽落点
     const title = ref("");
     const pos = ref<Position | null>(null);
     const page = ref(0);
@@ -52,6 +59,7 @@ export const App = defineComponent({
     const galAccount = ref("");   // 已登录账号显示名（喂 Gallery 账号 popup）
     const galTrash = ref<{ cloudId: string; name: string }[]>([]);    // 回收站项（懒加载）
     const galBackup = ref<{ cloudId: string; name: string }[]>([]);   // 备份箱项（懒加载）
+    const galCurrentFolder = ref("");   // Gallery 当前层（@folderchange 汇报）；拖拽上传落点用
     async function refreshGallery(): Promise<void> {
       if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
       galLoading.value = true;
@@ -136,6 +144,37 @@ export const App = defineComponent({
         showToast(failed.length ? `上传 ${ok} 个，${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
       }, "", "上传失败(同名/未登录/离线?)").then(() => { if (last) void openPaper(last); });
     }
+    function onGalFolderChange(folder: string): void { galCurrentFolder.value = folder; }
+
+    // 拖拽上传(抄旧版 spec)：整窗监听、**任何模式都能拖**(阅读时也行)，不只开图库时。
+    // dragenter 计数防抖(进子元素也 fire dragleave)；dragover 必 preventDefault 否则不触发 drop。
+    // 落点：图库开着→当前文件夹；否则→papers 根。上传完 onGalUpload 自动打开最后一份。
+    const dragActive = ref(false);
+    let dragDepth = 0;
+    const canDrop = (): boolean => galSignedIn.value;   // 上传需登录；未登录不亮蒙层、drop 提示登录
+    function onDragEnter(e: DragEvent): void {
+      if (!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); if (!canDrop()) return;
+      dragDepth += 1; dragActive.value = true;
+    }
+    function onDragOver(e: DragEvent): void {
+      if (!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); if (canDrop() && e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    }
+    function onDragLeave(e: DragEvent): void {
+      if (!dtHasFiles(e.dataTransfer)) return;
+      dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) dragActive.value = false;
+    }
+    function onDrop(e: DragEvent): void {
+      if (!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); dragDepth = 0; dragActive.value = false;
+      if (!canDrop()) { showToast("请先登录 OneDrive"); return; }
+      const files = Array.from(e.dataTransfer?.files || []).filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+      if (!files.length) { showToast("不是 PDF，忽略"); return; }
+      // 落点：图库开着→图库当前层；阅读模式→当前论文所在文件夹（user 钉）。
+      onGalUpload({ folder: galleryOpen.value ? galCurrentFolder.value : currentPaperFolder.value, files });
+    }
+
     function onGalDeleteFolder(rel: string): void {
       // store removeFolder：非空→抛(catch 提示)；不存在→返 false(已没了,也算成功)。
       void withGalleryBusy(() => persistence().content.deleteFolder(`${PAPERS_FOLDER}/${rel}`).then(() => undefined),
@@ -187,6 +226,7 @@ export const App = defineComponent({
         else cat.upsert(docId, { fileName: item.name });
         cat.touch(docId);
         currentDocId.value = docId; title.value = item.title; pos.value = null; outline.value = [];
+        currentPaperFolder.value = pathFolder(item.name);   // 阅读模式拖拽 → 落当前论文同夹
         const restore = cat.get(docId)?.position ?? null;
         const t3 = performance.now();
         await v()?.loadBlob(blob, { key: docId, pos: restore });
@@ -207,6 +247,9 @@ export const App = defineComponent({
 
     onMounted(async () => {
       applyTheme();
+      // 拖拽上传整窗常驻(根组件不卸载,无需 remove)。
+      window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver);
+      window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
       const auth = persistence().auth;
       let resumed = false;
       async function onSignedIn(): Promise<void> {
@@ -250,8 +293,8 @@ export const App = defineComponent({
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
       currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel, buildId: BUILD_ID,
-      galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup,
-      onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
+      galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup, dragActive,
+      onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, onGalFolderChange, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
       conflictUi, answerConflict, passwordUi, answerPassword,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
@@ -298,7 +341,7 @@ export const App = defineComponent({
         <Gallery v-if="galleryOpen" :items="galItems" :folders="galFolders" :signed-in="galSignedIn" :loading="galLoading" :account="galAccount" :trash="galTrash" :backup="galBackup"
           @open="onGalleryOpen" @close="galleryOpen = false" @toast="onToast" @refresh="refreshGallery" @loadbin="onGalLoadBin"
           @rename="onGalRename" @move="onGalMove" @trash="onGalTrash" @keepoffline="onGalKeepOffline" @offload="onGalOffload" @restore="onGalRestore" @purge="onGalPurge" @emptytrash="onGalEmptyTrash"
-          @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload"
+          @newfolder="onGalNewFolder" @deletefolder="onGalDeleteFolder" @upload="onGalUpload" @folderchange="onGalFolderChange"
           @signin="onGalSignin" @signout="onGalSignout" />
         <aside class="jrp-outline" v-if="outlineOpen">
           <div class="jrp-ctrlbar">
@@ -359,6 +402,13 @@ export const App = defineComponent({
       <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div></div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>
+      <div class="jrp-drop-overlay" v-if="dragActive">
+        <div class="jrp-drop-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div class="jrp-drop-title">松手即上传</div>
+          <div class="jrp-drop-hint">PDF 进论文库，并打开最后一份</div>
+        </div>
+      </div>
     </div>
   `,
 });
