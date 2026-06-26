@@ -6,7 +6,7 @@ import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
 import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, passwordUi, answerPassword } from "../app-state.ts";
-import { PAPERS_FOLDER } from "../config.ts";
+import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
 
@@ -249,7 +249,7 @@ export const App = defineComponent({
 
     return {
       viewerRef, galleryOpen, outlineOpen, outline, outlineFlat, menuOpen,
-      currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel,
+      currentDocId, title, pos, page, total, spread, themeLabel, appUi, saveLabel, buildId: BUILD_ID,
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
@@ -325,7 +325,7 @@ export const App = defineComponent({
           <div class="jrp-menu-sep"></div>
         </template>
         <button class="jrp-menu-item" @click="cycleTheme">颜色模式 · {{ themeLabel }}</button>
-        <button class="jrp-menu-item" @click="forceUpdate">强制更新</button>
+        <button class="jrp-menu-item" @click="forceUpdate">强制更新 · <span class="jrp-build-id">{{ buildId }}</span></button>
       </div>
       <div class="jrp-confirm-backdrop" v-if="confirmState.open" @click="confirmAnswer(false)"></div>
       <div class="jrp-confirm" v-if="confirmState.open">

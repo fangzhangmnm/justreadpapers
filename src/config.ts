@@ -22,3 +22,10 @@ export const TRIVIAL_Y_DELTA = 0.5;             // 同页 + |yΔ|<0.5 = trivial(
 // 阅读
 export const READING_LINE_ANCHOR = 0.25;        // reading-line 在 viewport 内固定锚位
 export const PDF_CACHE_CAP_BYTES = 250 * 1024 * 1024;
+
+// build 版本号 = bundle content-hash(每次 build 必变),从本模块运行时 URL(已被 esbuild 打成
+// 单 jrp-<hash>.mjs)抠出。给 ☰ 菜单显示,让人肉眼确认"这次推送的新版到了没"。
+export const BUILD_ID = (() => {
+  try { const m = String(import.meta.url).match(/jrp-([0-9a-f]+)\.mjs/i); return m ? m[1] : "dev"; }
+  catch { return "dev"; }
+})();

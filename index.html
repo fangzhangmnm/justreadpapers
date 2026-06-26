@@ -146,6 +146,8 @@
   .jrp-menu-item:hover:not([disabled]) { background: var(--hover); }
   .jrp-menu-item[disabled] { opacity: 0.4; cursor: default; }
   .jrp-menu-sep { height: 1px; background: var(--line2); margin: 4px 0; }
+  /* build 版本号(bundle hash):暗、等宽,肉眼对比"推送到了没"。 */
+  .jrp-build-id { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; opacity: 0.5; }
   /* in-app 确认对话（红线：禁 system confirm）。 */
   .jrp-confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); z-index: 200; }
   .jrp-confirm { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 201;
@@ -172,6 +174,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script type="module" src="./dist/jrp-70217a6dd764.mjs"></script>
+<script type="module" src="./dist/jrp-76bbdab1b527.mjs"></script>
 </body>
 </html>
