@@ -251,34 +251,41 @@ export const App = defineComponent({
       window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver);
       window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
       const auth = persistence().auth;
-      let resumed = false;
-      async function onSignedIn(): Promise<void> {
-        if (resumed) return; resumed = true;
-        // 整段 boot 续读裹一个遮罩：catalog.init(网络) → jumpscare→openPaper(自己也 withBusy，嵌套连续) → 不闪不双转。
-        await withBusy("打开…", async () => {
+      const acctName = (st: any): string => (st && st.account && (st.account.username || st.account.name)) || "";
+      // boot 续读分两段，互不卡死：
+      //  ①【带遮罩、唯一一次】从本地 catalog 续读并开论文/图库 —— 离线 / 未登录也走得通
+      //     （catalog.init 在离线/未登录下 cloud sync 优雅降级为本地，绝不卡死遮罩；
+      //      getToken 不再后台跳转，所以未登录时秒返回、遮罩立即抬起 → 进得了图库去登录）。
+      //  ②【后台、不遮罩、不重开】登录态后到（silent 探测翻 signedIn）→ 把云端 catalog 并进来。
+      let opened = false;      // 已 jumpscare（开过论文 / 已决定开图库）—— 只开一次，防双开双转
+      let cloudSynced = false; // 登录后云端 catalog 已同步 —— 只跑一次后台续读
+      async function doResume(overlay: boolean): Promise<void> {
+        const run = async (): Promise<void> => {
           const tc = performance.now();
           await persistence().catalog.init();
-          console.info("[jrp][perf] catalog.init(阅读态同步)", Math.round(performance.now() - tc), "ms");
-          jumpscare();
-        });
+          console.info("[jrp][perf] catalog.init", overlay ? "(本地续读)" : "(后台云同步)", Math.round(performance.now() - tc), "ms");
+          if (!opened) { opened = true; jumpscare(); }
+        };
+        if (overlay) {
+          try { await withBusy("打开…", run); } catch { if (!opened) { opened = true; galleryOpen.value = true; } }
+        } else {
+          try { await run(); } catch { /* 后台云同步失败无妨：本地已续读，下个 dirty 周期再推 */ }
+        }
       }
-      const acctName = (st: any): string => (st && st.account && (st.account.username || st.account.name)) || "";
       auth.onAuthChanged((st: any) => {
         galSignedIn.value = !!(st && st.signedIn);
         galAccount.value = acctName(st);
         void refreshGallery();
-        if (st && st.signedIn) void onSignedIn();
+        // 登录态到达 → 后台云端 catalog 同步（不遮罩、不重开；论文/图库已由 ① 决定）。
+        if (st && st.signedIn && !cloudSynced) { cloudSynced = true; void doResume(false); }
       });
-      // 离线/未登录也从本地缓存 hydrate 续读（catalog.init 离线时 cloud sync 优雅失败，本地位置仍在）。
-      async function resumeOffline(): Promise<void> {
-        try { await withBusy("打开…", async () => { await persistence().catalog.init(); jumpscare(); }); } catch { galleryOpen.value = true; }
-      }
       try {
         const st = await auth.initAuth();
         galSignedIn.value = !!st.signedIn;
         galAccount.value = acctName(st);
-        if (st.signedIn) await onSignedIn(); else await resumeOffline();
-      } catch { await resumeOffline(); }
+        if (st.signedIn) cloudSynced = true;   // 已登录：① 即云端续读，onAuthChanged 不再重复跑 ②
+        await doResume(true);                   // 唯一带遮罩的续读；未登录/probing 也在此优雅落地
+      } catch { await doResume(true); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
       window.addEventListener("pagehide", flush);
       document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
