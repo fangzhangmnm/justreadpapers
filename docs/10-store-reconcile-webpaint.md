@@ -128,7 +128,33 @@ JRP 在**结构**上领先（深模块分解 + store-driven Model-B + offload/re
 3. ✅ **subagent 静态论证红线**（§4.1，A/B 全 SAFE + 修了 C2 + 2 backlog）。
 4. **逐模块回传 WebPaint**：先 verify parity 的（cloud-sync/local-cache/folder-*/providers diff）；再 JRP→WP 下沉（offload/reconcile/collection-cache + getToken 修复 + C2 修）；Model-B（3.4）按你 §3.4 决定。WebPaint 红线为准，逐模块走 `pwa-cloud-store` skill。
 
-> 已落地（worktree 分支 `jrp-store-finalize`，未 merge 回 main，等收口批次一起落）：
-> `4b8c1a0` README §8 旧名修正 · `3b667ac` 本对账 doc · `28aabba` skip-to-offline · `a97da5b` C2 TOCTOU。
+---
+
+## 6. 对账状态 & STALE 清单（as-of 2026-06-28，2 个 subagent 对账后）
+
+**代码对账 ✓**（JRP 全部模块对过 WebPaint，结论=JRP 在 parity 或领先，**无 JRP 落后项**）：
+- cloud-sync 近乎逐字相同（仅 WP 缺 listBackup，additive）；folder-flow/merge/move-aside、graph.ts 逐字相同。
+- local-cache/idb（JRP 纯）vs WP local-adapter（反向 import app 代码污染）：同数据安全，JRP 更纯。
+- providers/auth.ts：**WP 还带 getToken redirect bug**（0caf386 已在 JRP 修）。
+
+**测试对账**：JRP 加密红线测试缺口已补（swap 两端/离线拒/错密码零副作用/byte-exact/锁定 getPreview/容器探测 false-cases/peek 错密码）。**仍开口（本 session 前既有代码，WebPaint 测了 JRP 没测）**：
+
+### STALE — 待补测试（按严重度）
+- **HIGH push 409/claim + H7 0字节 + no-base collision**（引擎唯一静默丢数据路径；cloud-sync.ts:137-195 守卫在、push.test 没驱动 409/claim 路径）。
+- **MED freshness R1 adopt-deferred 失败**（heal/save 失败时 etag 不前进、dirty 留 → 防重启后陈旧覆盖窗口）。
+- **MED identity**：dirty-rename → 旧名进 .trash；N7 旧名 trash 失败 → oldCloudOrphan 不吞；S1 move 采纳新 etag 不弹假冲突。
+- **MED trash**：cloud-restore 采纳 etag（不弹假 collision）；emptyTrash scope=cloud / 离线只清本地。
+- **MED move-aside**：同时钟两次 weakOverride 同名（guid 防撞）；.backup 不漏进 gallery 列表。
+- **MED provider contract**：`onedrive-provider.ts` 无 contract 测（0字节 Uint8Array 上传守卫=2026-06-05 prod bug、412/409/range）。
+
+### STALE — 待做（非测试）
+- **回传 WebPaint（phase 4，大件，未开始）**：把 JRP 领先项带进 WP 单体 store.ts——getToken 修复（红线，WP 还带 bug）· listBackup（additive）· codec 注入式 crypto-container · offload/reconcile/collection-cache 下沉 · 加密 wiring · content-agnostic local-cache 拆分（WP 反向 import app=污染，较大重构）· Model-B 决定（§3.4 待你拍）。逐模块走 pwa-cloud-store skill，WP 红线为准。
+- **真机验 /dev/**：本 session 全部改动（skip-to-offline 跳过按钮 / 加密全流程 / 开图库开 PDF 删除）未真机验。
+- **README §7 askPassword**：StoreUI 仍声明 askPassword 但加密改走 getPassword → askPassword 已 unwired（dead）；待清理或重新定位。
+- **config.encryptionSaltFileName**：字段还在（标「未采用」）；待移除。
+
+> 已落地 main→/dev/（worktree `jrp-store-finalize` 已全 merge）：
+> `4b8c1a0` README §8 · `3b667ac` 对账 doc · `28aabba` skip-to-offline · `a97da5b` C2 TOCTOU ·
+> `4a2a984` 2 backlog · `c651a0a` 加密 wiring + docs/11 · `0d967f0` 加密红线测试。
 </content>
 </invoke>
