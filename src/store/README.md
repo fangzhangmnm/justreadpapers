@@ -47,6 +47,7 @@ const store = createStore({
   ui,                                        // 必填：UI 回调 bundle，store 在决策点回调进来（见 §7）
   keepOnOpen: true,                          // 选填(默认 true)：消费模式。true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地，§2；range 按需取片是 ⚠TODO 优化)
   syncedSettingsFileName: "settings.json",   // 选填：要跨设备同步设置时给（§4）
+  validateAdopt,                             // **编辑器/珍贵数据类必填**：采纳云端字节前验是不是真容器（防损坏/HTML 拿合法 etag 覆盖唯一好本地=丢画）。只读镜像(可重下)可不给。
   // ── 加密（§5）：JRP 不加密就不给（dormant，省 1.6MB）──
   // crypto: myCodec,                        // 选填：app 注入的 zip/7z codec（不注入 = 加密不可用）
   // crypt: { ext, getPassword, makePeek },  // 选填：扩展名 + 非交互密码源 + peek 派生

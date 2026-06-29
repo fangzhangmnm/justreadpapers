@@ -153,6 +153,18 @@ JRP 在**结构**上领先（深模块分解 + store-driven Model-B + offload/re
 - **README §7 askPassword**：StoreUI 仍声明 askPassword 但加密改走 getPassword → askPassword 已 unwired（dead）；待清理或重新定位。
 - **config.encryptionSaltFileName**：字段还在（标「未采用」）；待移除。
 
+---
+
+## 7. 数据安全静态验证（as-of 2026-06-28，2 subagent，grounded MASTER.md §A）
+
+把 JRP store 当「WebPaint 要用的库」验，两角度：
+
+**「不丢画」（10 条 §A 红线）= 全 SAFE**。找不到静默丢画路径。每推 If-Match=_parent（非共享 _base）· 每删/覆盖 move-aside（.trash/.backup guid 同层）· dirty 结构上不可驱逐+不硬删 · 身份 path/name 先存新再删旧 · 冲突 surface 或 stash .backup。本 session 新代码全验安全（加密 swap 两端跟进不丢/错密码零副作用 · skip-to-offline 不前推版本故无陈旧覆盖 · offload TOCTOU 双修闭合 · markSeen 只在云端没动时）。
+- ⚠ **唯一残留（非 store bug，已收口为契约）**：红线 #5 clean 快进靠**可选 validateAdopt** 挡损坏云端覆盖干净本地；store 格式盲、自己验不了。**编辑器/珍贵类（WebPaint）必须注入**——已在 create-store.ts 注释 + README §1 标「必填」。只读镜像（JRP PDF 可重下）可不给。回传 WebPaint 时确认它传 validateAdopt。
+
+**「不 duplicate/ghost」= 无可避免的 ghost/dup bug**。所有重复都是 surfaced 的「宁可重复不丢」取舍（rename wart E · saveAs 拷贝 · 409 both-kept，各带 oldCloudOrphan/cloudDeferred/CloudNameCollisionError 信号）；reconcile demote 幂等不复活 · collection tombstone 正确（stale 设备旧 uat 复活不了删除）· .trash/.backup 三处列表面一致排除 · 加密 ext-flip 用 move 非 copy。
+- 软观察（非红线）：identity rename 的 `cloudDeferred` 分支新名没标 dirty → 云端收敛不自动（等下次 save 才推，wart E 慢收敛）。要自动收敛可在该分支标脏，但属 identity 红线区，待定。
+
 > 已落地 main→/dev/（worktree `jrp-store-finalize` 已全 merge）：
 > `4b8c1a0` README §8 · `3b667ac` 对账 doc · `28aabba` skip-to-offline · `a97da5b` C2 TOCTOU ·
 > `4a2a984` 2 backlog · `c651a0a` 加密 wiring + docs/11 · `0d967f0` 加密红线测试。

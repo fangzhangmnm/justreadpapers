@@ -52,6 +52,10 @@ export interface StoreConfig {
   kv?: Kv;
   local?: LocalCache;
   getPassword?: (name: string) => string | null;   // 旧顶层密码源（向后兼容；优先用 crypt.getPassword）
+  // 采纳云端字节前的有效性闸（N2：clean 快进/pull 覆盖本地前调）。store 格式盲、自己验不了内容 →
+  //   **编辑器/珍贵数据类消费者（如 WebPaint 画作）必须注入**（验是不是真 .ora/zip 容器），否则损坏/captive-portal
+  //   HTML 拿着合法 etag 能覆盖唯一好的本地副本 = 丢画（静态验证 2026-06-28 标定的唯一残留 不丢画 缺口）。
+  //   只读镜像类（JRP PDF，可重下）可不给。
   validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
