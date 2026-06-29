@@ -1,11 +1,11 @@
 # Handoff —— folder-panel epic（写于 store-drift 事故之后）
 
-> as-of 2026-06-23。接手前先读：本文 + `docs/14-folder-panel-epic.md`（设计 SSoT）+ `src/store/README.md`（库手册）。
+> as-of 2026-06-23。接手前先读：本文 + `docs/20260623-folder-panel-epic.md`（设计 SSoT）+ `src/store/README.md`（库手册）。
 > 信任顺序：代码现状 > journals 人类原话 > 本文。
 
 ## epic 进度（在 dev 上，未真机验；commit 在 main/origin）
 
-设计 SSoT：`docs/14-folder-panel-epic.md`。实现走单 worktree `jrp-folder-panel-epic`，每阶段 ff-merge 回 main + push dev。
+设计 SSoT：`docs/20260623-folder-panel-epic.md`。实现走单 worktree `jrp-folder-panel-epic`，每阶段 ff-merge 回 main + push dev。
 
 - **P1 已上 dev**：回收站视图（恢复/永久删/清空，**in-app confirm，绝不 system confirm**）+ 跨夹「移动到…」folder picker（非拖拽）。content 加 listTrash/restore/purge/emptyTrash。
 - **P2 已上 dev（⚠ 手搓，待审计）**：cache/uncache —— `evict.ts`+`pin-set.ts` + file.pin/unpin/evict/isCached/isPinned + store.localKeys + LocalCache.appKeys。gallery ⋯缓存/取消缓存 + cached/pinned badge。8 例对抗测试。**← 这套是 drift 风险面，用户已经开新agent解决，如果缺少合适api请escalate，进入api design phase。**

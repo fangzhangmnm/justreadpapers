@@ -98,8 +98,8 @@ function restorePosition({ pageIndex, yFraction }) {
 2. Device B 打开同篇 → 读 session.json → `loadPdf({position})` → pagesinit 后 `restorePosition`
 3. 体感 = "我在 desktop 读到这,Quest 一开就在这"
 
-如果 (1) 的节流过激,(3) 会 stale。见 [05-session-sync-throttle.md](05-session-sync-throttle.md) 的 close-event 兜底设计。
+如果 (1) 的节流过激,(3) 会 stale。见 [20260524-session-sync-throttle.md](20260524-session-sync-throttle.md) 的 close-event 兜底设计。
 
 ## 相关
-- [02-fit-width-zoom.md](02-fit-width-zoom.md) - zoom 是 device-local 的,跟 position 分清
-- [05-session-sync-throttle.md](05-session-sync-throttle.md) - position 怎么节流写 OneDrive
+- [20260524-fit-width-zoom.md](20260524-fit-width-zoom.md) - zoom 是 device-local 的,跟 position 分清
+- [20260524-session-sync-throttle.md](20260524-session-sync-throttle.md) - position 怎么节流写 OneDrive

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JRP store — drift / jailbreak / wheel-rebuild audit (2026-06-23)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark', themeVariables:{fontSize:'14px'}});</script>
+<style>
+  body{background:#0b0f17;color:#cdd6e4;font-family:ui-sans-serif,system-ui,"Segoe UI",sans-serif}
+  .card{background:#121826;border:1px solid #1f2a3d;border-radius:14px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .pill{font-size:11px;padding:2px 9px;border-radius:999px;font-weight:600;letter-spacing:.02em}
+  .b-strong{background:#7f1d1d;color:#fecaca}
+  .b-explore{background:#78350f;color:#fde68a}
+  .b-spec{background:#1e3a5f;color:#bfdbfe}
+  .b-clean{background:#14532d;color:#bbf7d0}
+  .b-info{background:#312e81;color:#c7d2fe}
+  .chip{font-size:11px;padding:1px 7px;border-radius:6px;background:#1f2a3d;color:#9fb0c9}
+  .before{background:#1a1320;border:1px solid #3b2236}
+  .after{background:#0f1a14;border:1px solid #1f4031}
+  h1,h2,h3{color:#eef2f9}
+  code{background:#0a0e16;padding:1px 5px;border-radius:5px;color:#e7b87a;font-size:.85em}
+  .funnel{background:linear-gradient(180deg,#14532d33,#0f1a14)}
+  a{color:#7dd3fc}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.grid-2{grid-template-columns:1fr}}
+</style>
+</head>
+<body class="px-4 py-8">
+<div class="max-w-5xl mx-auto">
+
+  <header class="mb-8">
+    <div class="flex items-center gap-3 flex-wrap">
+      <h1 class="text-3xl font-bold">JustReadPapers · store 漂移审计</h1>
+      <span class="pill b-info">as-of 2026-06-23</span>
+    </div>
+    <p class="mt-3 text-slate-400 leading-relaxed">
+      命题：<b class="text-slate-200">「找出我编辑 JRP store 时的 AI drift；以 WebPaint + MyPWAPatterns 为基线；报告任何 jailbreak 与 wheel-rebuilding，含 doc/markdown 漂移。」</b>
+    </p>
+    <p class="mt-2 text-slate-400 text-sm leading-relaxed">
+      <b>jailbreak（你的定义）</b>=绕过一个「本意是把所有行为收束进单一可预测路径」的 interface。<b>wheel-rebuild</b> 是 jailbreak 的一种：不走漏斗、而是在第二个地方重造漏斗的活，于是出现<em>并行路径 / 第二真相源</em>。
+    </p>
+    <p class="mt-2 text-slate-500 text-xs">
+      用语：module / interface / seam / adapter / depth / leverage / locality / <em>deletion test</em>（<a href="../../../20260601 MyPWAPatterns/CONTEXT.md">CONTEXT</a>）。基线红线：<a href="../../../20260601 MyPWAPatterns/docs/MASTER.md">MASTER §A</a>。引擎 SSoT：<a href="../../src/store/STORE.md">STORE.md</a> / <a href="../../src/store/CONTEXT.md">store/CONTEXT.md</a>。
+    </p>
+  </header>
+
+  <!-- EXEC SUMMARY -->
+  <section class="card p-6 mb-8">
+    <h2 class="text-xl font-semibold mb-3">一句话结论</h2>
+    <p class="leading-relaxed text-slate-300">
+      <b class="text-emerald-300">JRP store 的代码层基本没有漂移——它在「领先」而不是「跑偏」。</b>
+      你担心的 <b>pin 逻辑</b>不是 AI 编造：WebPaint 的 store <u>根本没有</u> pin/evict 深模块（那条红线只活在文档 + 一处 app 层债 N4）。JRP 把它正经收进了 store 漏斗。真正的漂移集中在 <b class="text-rose-300">文档/markdown</b>，外加一处<b class="text-amber-300">极轻的 deep-import jailbreak</b> 和两个<b class="text-amber-300">重构遗留的死文件</b>。
+    </p>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 text-center text-sm">
+      <div class="rounded-lg bg-[#0f1a14] border border-[#1f4031] p-3"><div class="text-2xl font-bold text-emerald-300">0</div><div class="text-slate-400">代码红线被弱化</div></div>
+      <div class="rounded-lg bg-[#1a1410] border border-[#3b2e16] p-3"><div class="text-2xl font-bold text-amber-300">1</div><div class="text-slate-400">真 jailbreak（deep-import，type-only）</div></div>
+      <div class="rounded-lg bg-[#1a1410] border border-[#3b2e16] p-3"><div class="text-2xl font-bold text-amber-300">2</div><div class="text-slate-400">死文件（重构遗留 wheel）</div></div>
+      <div class="rounded-lg bg-[#1a1320] border border-[#3b2236] p-3"><div class="text-2xl font-bold text-rose-300">7+</div><div class="text-slate-400">doc 漂移（含 1 处红线误述）</div></div>
+    </div>
+    <p class="mt-4 text-xs text-slate-500">信任顺序（家族 CLAUDE.md）：<b>代码现状 &gt; 人类原话 &gt; ADR &gt; AI 写的 how 文档</b>。本报告所有判断以读到的代码为准，doc 与代码矛盾时信代码。</p>
+  </section>
+
+  <!-- CARD 1 — PIN/EVICT centerpiece -->
+  <article class="card p-6 mb-6 border-l-4 border-emerald-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">① pin / evict —— 「AI 是不是凭空造了 pin 逻辑？」</h2>
+      <span class="pill b-clean">不是漂移 · JRP 领先</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">store/pin-set.ts · store/evict.ts · store/create-store.ts:80-142 · vs WebPaint/src/store/*（无） · WebPaint/docs/20260528-backlog.md:640 (N4)</p>
+
+    <h3 class="font-semibold text-slate-200 mb-1">现象 / 你的疑问</h3>
+    <p class="text-slate-300 text-sm leading-relaxed mb-4">
+      MASTER §A 把「驱逐红线（dirty 永不被驱逐、auto-pinned）」列为核心。你以为这套 pin/evict 是 WebPaint store 的红线中心，却看到 JRP store 里冒出全新的 <code>pin-set.ts</code> + <code>evict.ts</code>，于是怀疑：要么 WebPaint store 有根本缺陷，要么 JRP 的 agent 在编造。
+    </p>
+
+    <h3 class="font-semibold text-slate-200 mb-1">查证（代码现状）</h3>
+    <ul class="text-slate-300 text-sm leading-relaxed mb-4 list-disc pl-5 space-y-1">
+      <li><b>WebPaint <code>src/store/</code> 里 pin/evict 命中数 = 0。</b> 全 repo 的 <code>pin</code> 命中全是 UI 取色器气泡（<code>color-panel.ts</code> 的「吸色 pin tooltip」），与存储无关。</li>
+      <li>WebPaint 的驱逐守卫<b>不在深模块</b>——它躺在 app 层 <code>session-state.ts:492-502</code>，而且是<b>已知债</b>：backlog <code>N4「驱逐 cloud-dirty 副本无 .backup stash，guard 不在深模块」</code>。</li>
+      <li>WebPaint 的 handoff doc 把 <code>pin</code> 列为「app owns 的云表面 7 项」之一——<b>计划要做、从未抽成深模块</b>。</li>
+      <li>JRP 的 <code>evict.ts</code> 把整条红线收进<b>一处</b>：<code>只驱逐 clean ∧ 在线 ∧ 云端仍有 ∧ !pinned</code>，自述「逻辑零新红线＝组合 head.isDirty / cloud.fetchMeta / local.exists/hardDelete + pin-set」。</li>
+      <li>JRP 干净地<b>分开了两种 pin</b>（见下图），且<b>没有第二真相源</b>：pin 态只活在 <code>pin-set</code>(kv)，cached 态只活在 <code>local.exists</code>；<code>gallery-model</code> / <code>content.ts</code> 只是<em>注入谓词函数</em>去读，不自管。</li>
+    </ul>
+
+    <div class="grid-2 my-5">
+      <div class="before rounded-xl p-4">
+        <div class="pill b-strong mb-3 inline-block">WebPaint —— 漏斗缺失</div>
+        <pre class="mono text-[12px] leading-5 text-rose-200/90">  MASTER §A 红线（文档）
+        │  「evict iff clean∧refetchable
+        │   dirty 永不驱逐 / auto-pin」
+        ▼   ……但代码里没有 store 漏斗
+  ┌─────────────────────────────┐
+  │ app 层 session-state.ts      │  ← 守卫散在这
+  │ :492-502  (手写 + UI confirm) │
+  │  ⚠ N4: 驱逐 cloud-dirty       │
+  │     无 .backup stash (bug)    │
+  └─────────────────────────────┘
+   pin = 仅 handoff doc 的「待做」项</pre>
+        <p class="text-xs text-rose-200/70 mt-2">红线只活在 doc；机制在 app 层、有 bug、未深模块化。</p>
+      </div>
+      <div class="after rounded-xl p-4">
+        <div class="pill b-clean mb-3 inline-block">JRP —— 单一漏斗</div>
+        <pre class="mono text-[12px] leading-5 text-emerald-200/90">  file.pin / unpin / evict（唯一入口）
+        ▼
+  ┌─────────────────────────────┐
+  │ evict.ts（深模块·红线全在此）  │
+  │  kept ⇐ dirty / offline /     │
+  │         cloud-gone / pinned   │
+  │  evicted ⇐ 其余 (hardDelete)  │
+  └───────────┬─────────────────┘
+   组合: head.isDirty · cloud.fetchMeta
+         local.exists · pin-set
+   零新红线 · deletion test: 删它→红线
+   会在 N 个 caller 重新长出来 ✓ deep</pre>
+        <p class="text-xs text-emerald-200/70 mt-2">红线收进一处深模块；可单测；app 碰不到。</p>
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-[#0d1420] border border-[#22304a] p-4 mb-4">
+      <div class="text-sm font-semibold text-slate-200 mb-2">关键：JRP 正确区分了两种 pin（MASTER §A 的「auto-pinned」把它们混为一谈）</div>
+      <pre class="mermaid">
+flowchart LR
+  A[文件本地字节] --> B{为什么要留着?}
+  B -->|安全: 有未推编辑| C[head.isDirty 守卫<br/>evict.ts 内·红线·系统强制]
+  B -->|可用性: 用户要飞机上看| D[pin-set·per-device·不同步<br/>用户显式 pin·正交于冲突]
+  C --> E[evict 决策 OR 收束于 evict.ts]
+  D --> E
+  E -->|kept / evicted| F[单一可预测出口]
+      </pre>
+      <p class="text-xs text-slate-400 mt-1">两条「留住字节」的理由（安全 vs 可用性）在 <code>evict.ts</code> 里 OR 在一起，单一决策点。不是两个真相源。</p>
+    </div>
+
+    <h3 class="font-semibold text-slate-200 mb-1">判定</h3>
+    <p class="text-slate-300 text-sm leading-relaxed">
+      <b class="text-emerald-300">两个选项都不完全对，准确说法偏第一个：WebPaint store 不是「有根本缺陷」，而是「不完整」</b>——驱逐红线从没被抽进 store，一直以 app 层债（N4）形式存在。JRP 的 agent <b>没有编造</b>：它实现了 MASTER §A 一直要求、WebPaint 一直没写的那条红线，做成了教科书式单漏斗深模块；而 <code>pin-set</code>（per-device 离线常驻）是 JRP 产品真需要的<b>新功能</b>（「各端接着读、飞机上能看」），WebPaint 这种「本地全留」的画板 app 从不需要。这正是你说的「我在 JRP 精炼 interface 与 scope」。
+    </p>
+    <div class="rounded-xl bg-[#0d1420] border border-[#22304a] p-4 mt-4">
+      <div class="text-sm font-semibold text-slate-200 mb-1">用「不重推红线」规则复核（碰 pin/evict/缓存/加密/冲突 绝不手搓重导，找旧 vetted 版对齐移植，drift=毒）</div>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        这条规则正是为 pin/evict 这种场景设的。复核 <code>evict.ts</code>：它<b>没有手搓新红线</b>——自述「零新红线＝组合 <code>head.isDirty</code>/<code>cloud.fetchMeta</code>/<code>local.exists</code>/<code>hardDelete</code> + pin-set」，并显式对齐到<b>设计文档</b>（注释引 <code>state-machine §1-2</code>、<code>potential-bugs I6/J6</code>、MASTER §A）。规则允许的 vetted 源包含「设计文档」，所以这是<b>合规的「对齐移植」而非「手搓重导」</b>。
+        <br><b class="text-amber-300">唯一需要额外验的：</b>WebPaint 没有<em>代码层</em>祖先可 port（它的守卫在 app 层 <code>session-state.ts:492-502</code> 且带 N4 bug），所以 <code>evict.ts</code> 是按设计文档<b>新写</b>的红线代码。建议拿它对 MASTER §A + WebPaint 那段 app 守卫逐条做 parity diff 确认无静默偏差，并把它定为<b>共享 vetted 版</b>（见 ⑥ 反向传播）。
+      </p>
+    </div>
+  </article>
+
+  <!-- CARD 2 — jailbreak deep import -->
+  <article class="card p-6 mb-6 border-l-4 border-amber-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">② jailbreak：app 层 deep-import 进 store 内部</h2>
+      <span class="pill b-explore">真违规 · 但极轻（type-only）</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">src/persistence/content.ts:5</p>
+    <h3 class="font-semibold text-slate-200 mb-1">Problem</h3>
+    <p class="text-slate-300 text-sm leading-relaxed mb-3">
+      <code>import type { Bytes } from "../store/types.ts";</code> —— 这是从 store 内部文件直接拿类型，绕过了唯一入口 <code>index.ts</code>。<code>types.ts</code> 顶部写着「store 深模块共享类型契约」，且 <code>index.ts</code> <b>没有 re-export <code>Bytes</code></b>。这正是 STORE.md 铁律 #4 + build lint 要挡的 deep-import：<b>它绕过了「app 只跟一个入口打交道」这个漏斗。</b>
+    </p>
+    <h3 class="font-semibold text-slate-200 mb-1">为什么仍然要修（即便它「只是个类型」）</h3>
+    <p class="text-slate-300 text-sm leading-relaxed mb-3">
+      <code>Bytes</code> 不过是 <code>Uint8Array</code>，<code>import type</code> 运行期被擦除、碰不到任何 guts，所以<em>当下零数据风险</em>。但漏斗的价值在「<b>没有例外</b>」——一旦默许一个「无害的」deep-import，lint 白名单就开了缝，下一个 agent 会照例外推进到运行期 import。正解：escalate，让 <code>index.ts</code> re-export <code>Bytes</code>（库 API 缺口，按铁律 #3 改库、不在 app 端绕）。
+    </p>
+    <div class="grid-2 my-3">
+      <div class="before rounded-xl p-3"><div class="pill b-strong mb-2 inline-block">Before</div><pre class="mono text-[12px] leading-5 text-rose-200/90">content.ts
+  ├─ import {…} from "../store/index.ts"   ✓
+  └─ import type {Bytes}
+        from "../store/types.ts"           ✗ deep</pre></div>
+      <div class="after rounded-xl p-3"><div class="pill b-clean mb-2 inline-block">After</div><pre class="mono text-[12px] leading-5 text-emerald-200/90">index.ts  export type {Bytes}
+content.ts
+  └─ import type {Bytes}
+        from "../store/index.ts"           ✓ 漏斗</pre></div>
+    </div>
+    <p class="text-xs text-slate-500">其余 app 层（ui/、domain/、config、app-state、catalog、gallery-model）<b>全清白</b>：无 localStorage / indexedDB / MSAL / Graph / 裸 fetch；唯一碰 store 的是 <code>persistence/</code>，且只走 <code>index.ts</code>（这一处例外）。<code>config.ts</code> 的 MSAL 字符串是喂给 <code>createOneDriveProvider</code> 的惰性常量，非违规。</p>
+  </article>
+
+  <!-- CARD 3 — orphan wheels -->
+  <article class="card p-6 mb-6 border-l-4 border-amber-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">③ wheel：重构遗留的死文件（旧漏斗没拆掉）</h2>
+      <span class="pill b-explore">死代码 · 0 import</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">src/store/store.ts (1047 行) · src/store/folder-store.ts (92 行) · idb-store.ts:51 copy()</p>
+    <h3 class="font-semibold text-slate-200 mb-1">Problem</h3>
+    <p class="text-slate-300 text-sm leading-relaxed mb-3">
+      重构把旧巨石 <code>store.ts</code> 的活全拆进了 10 个深模块，由 <code>create-store.ts</code> 组合（这是好事、是「重造的轮子」本体）。但<b>旧巨石和旧 facade 还躺在磁盘上</b>：
+    </p>
+    <ul class="text-slate-300 text-sm leading-relaxed mb-3 list-disc pl-5 space-y-1">
+      <li><code>store.ts</code>（整个旧 WebPaint <code>createStore</code>，1047 行）—— <b>0 个真实 import</b>（grep <code>from "./store.ts"</code> 为空；<code>index.ts</code> 导出的是 <code>create-store.ts</code>）。完全孤儿。</li>
+      <li><code>folder-store.ts</code>（旧 <code>createFolderStore</code> facade）—— <b>0 import</b>，已被 <code>collection.ts</code> 取代（<code>collection</code> 直接复用更底层的 <code>folder-flow</code>/<code>folder-merge</code>，不经 folder-store）。</li>
+      <li>次要：<code>idb-store.ts:51 copy()</code> 单个死 helper（<code>local-cache.backup</code> 用 <code>put</code> 不用 <code>copy</code>）。</li>
+    </ul>
+    <div class="rounded-xl bg-[#0d1420] border border-[#22304a] p-3 mb-3 text-sm text-slate-300">
+      <b>注意区分</b>：<code>folder-flow.ts</code> / <code>folder-merge.ts</code> 是 <b>LIVE</b>（被 collection 复用）—— 合法共享深模块，别一起删。<code>local-cache.ts</code> + <code>idb-store.ts</code> 是<b>有意的两层切分</b>（单一 IDB owner），不是重复轮子。OLD-ENGINE.md §E/§F 列出的 seal/safe-resolve/push/freshness/delete/identity/trash/local-head 全 LIVE、组合正确——<b>有意精炼，不是 wheel</b>。
+    </div>
+    <p class="text-slate-300 text-sm leading-relaxed">
+      <b>Deletion test：</b>删 <code>store.ts</code> / <code>folder-store.ts</code> → 没有任何复杂度回流（0 caller）。这是纯死重量。它们的危害是<b>误导</b>：未来 agent grep 到旧 <code>createStore</code>/<code>folder-store</code>，可能照旧引擎心智改错地方。<b>建议删除，并在 OLD-ENGINE.md 标注重构走向已偏离 R1（见 ④）。</b>
+    </p>
+  </article>
+
+  <!-- CARD 4 — STORE.md phantom APIs -->
+  <article class="card p-6 mb-6 border-l-4 border-rose-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">④ doc 漂移（高危）：STORE.md 把未实现的 API 写成已实现</h2>
+      <span class="pill b-strong">HIGH · 自称 SSoT 却误导</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">src/store/STORE.md §1/§5/§7 (加密) · §2 (setPreview) · §3 (collection 生命周期) · OLD-ENGINE.md §E/§F</p>
+    <p class="text-slate-300 text-sm leading-relaxed mb-3">
+      STORE.md 自称「行为以本文为准（本文＝引擎 SSoT）」，却含最多代码矛盾——一个被告知「信这份 doc」的 agent 会被带沟里：
+    </p>
+    <ul class="text-slate-300 text-sm leading-relaxed mb-3 list-disc pl-5 space-y-1">
+      <li><b>加密整章是幻影</b>：<code>createSevenZip</code>、<code>sevenZip</code> 配置、<code>store.encryption.*</code>、<code>encrypted:true</code>、<code>saveEncrypted/openEncrypted</code>、<code>addEncryption/removeEncryption</code> —— 在 <code>create-store.ts</code> 里<b>全不存在</b>。代码自己标了 <code>encryptionSaltFileName // ⚠TODO 本版未实现</code>，STORE.md §5 却当可用功能写、零 TODO。</li>
+      <li><b><code>ZipFile.setPreview/getPreview</code></b> 文档当能用；代码 <code>create-store.ts:153</code> 是 <code>throw "⚠TODO：zip 预览管线尚未实现"</code>。</li>
+      <li><b><code>collection</code> 生命周期漂移</b>：实际产线用 <code>store.collection(name,{manual:true})</code> 且<b>必须先 <code>init()</code></b>（拉云 merge 进内存），STORE.md §3 既没写 <code>{manual}</code>、也没写 <code>init()</code>/<code>flush()</code>（只写了 <code>flushLocal()</code>，还宣称只有 auto-sync 一种模式）。照 doc 走会拿到空集合。</li>
+      <li><b>过期 TODO</b>：§3 仍写「⚠TODO 改名 collection」，但 <code>collection.ts</code> 已是 live 模块。</li>
+      <li><b>无 as-of 戳</b>：自称 SSoT 的 doc 反而没有 freshness 戳（最该有戳的恰恰是它）。</li>
+    </ul>
+    <p class="text-xs text-slate-500">OLD-ENGINE.md 同源问题：§E 把整套 <code>createStore({provider,ui})</code> 写成「待做目标」，实则已 ship（<code>create-store.ts:71</code> 就是 live 签名）；§F 还在问「R1 还是别的切法？请你定①②③」，但 13-roadmap 记录 R1 已执行——<b>且实际走的是全抽深模块（R2 形态），这正是 store.ts 被孤立的原因（③）</b>。</p>
+  </article>
+
+  <!-- CARD 5 — README + docs/00-12 stale -->
+  <article class="card p-6 mb-6 border-l-4 border-rose-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">⑤ doc 漂移：README + docs/00–12 描述的是已删的旧架构（含 1 处红线误述）</h2>
+      <span class="pill b-strong">HIGH (红线措辞) + MED</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">README.md:66-90 · docs/20260524-offline-persistence.md:161 · docs/05 · docs/06/07 (CDN) · docs/12 · docs/README.md</p>
+    <ul class="text-slate-300 text-sm leading-relaxed mb-3 list-disc pl-5 space-y-1">
+      <li><b class="text-rose-300">红线误述（HIGH）</b>：<code>docs/07:161</code> 写 <code>merge 直接 last-write-wins-with-local-bias</code>——正是 MASTER §A 第一条红线禁的 <b>LWW 措辞</b>。live 引擎是 per-item uat-LWW + 冲突 surface + trash（<code>collection.ts</code>/<code>folder-merge</code>），不是「LWW with local bias」。位置数据本身低 Preciousness、行为尚可辩护，但 doc 的<em>词</em>会教坏未来 agent，且「用户不会误覆盖位置」被当成跳过冲突 surface 的许可证。</li>
+      <li><b>README 架构段</b>（:66-90）列 <code>config.js/auth.js/graph.js/session.js/cache.js/viewer.js/app.js</code> —— <b>这些文件都不存在</b>（已 TS 重写）。公开 README，可见度高。</li>
+      <li><b>docs/05+07</b> 详述手写 <code>If-Match</code>/412/merge/keepalive + <code>localStorage</code> 备份栈 —— 正是现在红线禁止的「app 直接碰 localStorage/cloud」，却当现行实现写、无「已废」标注。</li>
+      <li><b>docs/06/07 引 CDN</b>（<code>cdn.jsdelivr.net</code>/<code>unpkg</code> precache pdf.js）—— 违反 MASTER §B「No CDN / vendor 一切」；重写实际已 vendor。</li>
+      <li><b>docs/12 + docs/00</b> 把「PDF cache = IndexedDB 250MB LRU」当已决；PLAN.md 标其为<b>P3 未决问题</b>（Cache API vs store LocalAdapter vs IDB）；live 是 store 的 <code>evict</code> 模型。README 还说 1GB、docs/12 说 250MB——两份过期 doc 自相矛盾。</li>
+      <li><b>docs/README.md 无 as-of 戳、无「pre-rewrite」横幅</b>：它是把人导进 12 份过期 doc 的索引。<b>一条横幅即可隔离全部 13 份</b>（最高杠杆的单点修复）。</li>
+    </ul>
+    <p class="text-xs text-slate-500"><b>无编造规则 / 无伪造语录</b>：凡引用用户处均有可信日期出处（PLAN「user 2026-06-20 定」等）。最新的 <code>20260622-roadmap-status.md</code>(as-of 06-22) / <code>20260623-folder-panel-epic.md</code>(06-23) 反而最规矩、带戳、正确标了 ⚠TODO 与「未真机验」——可信锚点。漂移呈<b>年龄梯度</b>：5月旧 doc 最旧、STORE.md 中段 aspirational、13/14 干净。</p>
+  </article>
+
+  <!-- CARD 6 — inverse risk -->
+  <article class="card p-6 mb-6 border-l-4 border-sky-500">
+    <div class="flex items-center gap-3 flex-wrap mb-1">
+      <h2 class="text-xl font-semibold">⑥ 反向风险：JRP 领先 → reconcile 债 + 传播方向 + MASTER §A 措辞该修</h2>
+      <span class="pill b-spec">Worth exploring</span>
+    </div>
+    <p class="text-xs text-slate-500 mb-4 mono">FORK-BASE.md · MASTER §A 「auto-pinned」 · 2026-06-23「互拷」模型</p>
+    <p class="text-slate-300 text-sm leading-relaxed mb-3">
+      你真正该担心的是疑问的<b>反面</b>：JRP 的 <code>evict.ts</code>/<code>pin-set.ts</code> 比 WebPaint 干净，而 FORK-BASE.md 说将来要拿 base commit 对 WebPaint 做 3-way diff reconcile——这条线现在两边已结构性分叉（WebPaint 无 evict 深模块、带 N4 bug；JRP 有）。按你 2026-06-23 拍板的<b>「兄弟互拷、PWAPattern 不是 SSoT」</b>模型，正确的传播方向是 <b>JRP → WebPaint</b>（把 evict/pin-set 拷过去，顺手清掉 N4），而不是反向。
+    </p>
+    <p class="text-slate-300 text-sm leading-relaxed mb-2">
+      另一处<b>是 doc 该向代码看齐、不是代码错</b>：MASTER §A 写「dirty 永不驱逐（<b>auto-pinned</b> + .backup）」，把「安全保留」和「用户 pin」混成一个词。JRP 的实现把两者正交分开（dirty 在 evict.ts 内用 <code>isDirty</code> 守、pin-set 纯用户驱动），更干净。<b>建议：精炼 MASTER §A 的「auto-pinned」措辞</b>，区分 safety-keep 与 user-pin——否则下一个 agent 可能真去写「把 dirty 加进 pin-set」的多余耦合。
+    </p>
+  </article>
+
+  <!-- TOP RECO -->
+  <section class="card p-6 mb-10 funnel border border-emerald-700">
+    <h2 class="text-xl font-semibold mb-3">Top recommendation —— 先动哪个</h2>
+    <ol class="text-slate-200 text-sm leading-relaxed list-decimal pl-5 space-y-2">
+      <li><b class="text-rose-300">先修 ④ STORE.md 的幻影 API</b>。它自称引擎 SSoT 却把未实现的加密 / setPreview 写成可用——这是唯一会<b>直接误导未来 agent 做出数据安全误判</b>的漂移。给 §5/§2 标 ⚠TODO/未实现 + 补 §3 的 <code>init()/flush()/{manual}</code> + 打 as-of 戳。零代码风险、纯文档、收益最大。</li>
+      <li><b class="text-rose-300">⑤ 一条横幅隔离 13 份旧 doc</b> + 删掉 README 的「已删 .js 架构」段 + 改掉 <code>docs/07:161</code> 的 LWW 红线措辞。低成本、挡住「照旧 doc 直接碰 localStorage/CDN」的复发。</li>
+      <li><b class="text-amber-300">③ 删两个死文件</b>（<code>store.ts</code> / <code>folder-store.ts</code>）+ <code>idb-store.copy()</code>，并在 OLD-ENGINE.md 记「重构实走全抽深模块、非 R1」。消除最大的「误导式 wheel」。</li>
+      <li><b class="text-amber-300">② escalate 修 <code>Bytes</code> deep-import</b>：让 <code>index.ts</code> re-export，content.ts 改走入口。保住「漏斗无例外」。</li>
+      <li><b class="text-sky-300">⑥ 记一笔传播 TODO</b>：evict/pin-set 互拷回 WebPaint（清 N4）；精炼 MASTER §A「auto-pinned」措辞。非紧急，但别忘。</li>
+    </ol>
+    <p class="mt-4 text-sm text-emerald-200/80">底线复述：<b>你的 pin 疑虑可以放下——JRP 没编造、是它领先；evict.ts 是按设计文档「对齐移植」而非「手搓重导」（合「不重推红线」规则）。要治的是文档漂移，不是 store 代码。</b></p>
+  </section>
+
+  <footer class="text-xs text-slate-600 text-center pb-8">
+    生成：improve-codebase-architecture · 只读审计，未改任何代码 · 基线 WebPaint v321-324 fork (2e9a809) + MyPWAPatterns MASTER §A
+  </footer>
+
+</div>
+</body>
+</html>

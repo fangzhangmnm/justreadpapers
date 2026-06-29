@@ -161,6 +161,6 @@ cache 命中是自动的离线路径。
 不同:webxiaoheiwu 写小说 doc 内容,冲突要保留两份(sibling .txt)避免覆盖用户文字;justreadpapers 写位置数据,本设备活跃为准就行(用户不会"误覆盖位置"),merge 直接 last-write-wins-with-local-bias。
 
 ## 相关
-- [05-session-sync-throttle.md](05-session-sync-throttle.md) — session.json sync 细节
-- [06-pwa-hot-update.md](06-pwa-hot-update.md) — SW 同时做缓 / 更新
-- [12-cache-frecency.md](12-cache-frecency.md) — IndexedDB blob 淘汰
+- [20260524-session-sync-throttle.md](20260524-session-sync-throttle.md) — session.json sync 细节
+- [20260524-pwa-hot-update.md](20260524-pwa-hot-update.md) — SW 同时做缓 / 更新
+- [20260524-cache-frecency.md](20260524-cache-frecency.md) — IndexedDB blob 淘汰

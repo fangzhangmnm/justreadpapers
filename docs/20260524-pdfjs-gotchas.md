@@ -55,7 +55,7 @@ const naturalCssWidth = vp.width * (96 / 72) / vp.scale;
 
 v4.x、v5.x 都一样,不是版本问题。Mozilla 故意只把"基础 viewer"打进 npm dist,demo 用的那些(thumbnail / find / scripting)留给你自己 roll。
 
-后果:**缩略图概览必须自己写**,用 IntersectionObserver + `pdfPage.render()` 自渲染。见 [08-thumbnail-overview-diy.md](08-thumbnail-overview-diy.md)。
+后果:**缩略图概览必须自己写**,用 IntersectionObserver + `pdfPage.render()` 自渲染。见 [20260524-thumbnail-overview-diy.md](20260524-thumbnail-overview-diy.md)。
 
 ## 坑 3:`viewer.currentScaleValue = "page-width"` 在 spread mode 行为不一致
 

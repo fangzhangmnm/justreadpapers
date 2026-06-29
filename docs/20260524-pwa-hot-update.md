@@ -144,5 +144,5 @@ async function notifyUpdate(url) {
 - **skipWaiting + clientsClaim** 让新 SW 立即接管,无需关所有 tab。
 
 ## 相关
-- [00-design-principles.md](00-design-principles.md) — "iOS / Quest / 4K 同时跑"约束
-- [07-offline-persistence.md](07-offline-persistence.md) — SW 同时也是离线兜底
+- [20260524-design-principles.md](20260524-design-principles.md) — "iOS / Quest / 4K 同时跑"约束
+- [20260524-offline-persistence.md](20260524-offline-persistence.md) — SW 同时也是离线兜底

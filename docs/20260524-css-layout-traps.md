@@ -108,7 +108,7 @@ function detectScrollbarWidth() {
 }
 ```
 
-只在还没出来 (`offsetWidth === clientWidth`) 时 reserve,否则 clientWidth 已经把它扣了再扣就 double-subtract。详见 [02-fit-width-zoom.md](02-fit-width-zoom.md)。
+只在还没出来 (`offsetWidth === clientWidth`) 时 reserve,否则 clientWidth 已经把它扣了再扣就 double-subtract。详见 [20260524-fit-width-zoom.md](20260524-fit-width-zoom.md)。
 
 ## 坑 5:scrollbar styling Quest 不完全听
 
@@ -171,6 +171,6 @@ function toggleDrawer(name) {
 主题切换不用关心 on-accent 的对比,token 自动跟着切。
 
 ## 相关
-- [02-fit-width-zoom.md](02-fit-width-zoom.md) — scrollbar reserve in fit calc
-- [08-thumbnail-overview-diy.md](08-thumbnail-overview-diy.md) — 坑 1 出处
-- [10-device-compat.md](10-device-compat.md) — safe-area / DPR 各设备
+- [20260524-fit-width-zoom.md](20260524-fit-width-zoom.md) — scrollbar reserve in fit calc
+- [20260524-thumbnail-overview-diy.md](20260524-thumbnail-overview-diy.md) — 坑 1 出处
+- [20260524-device-compat.md](20260524-device-compat.md) — safe-area / DPR 各设备

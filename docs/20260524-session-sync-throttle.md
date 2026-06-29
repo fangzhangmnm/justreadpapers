@@ -172,6 +172,6 @@ try {
 OneDrive 版本历史 cap 25,1.25s 轮换一遍 evict 旧的 → **存储增量稳态 ~25KB**,无持久伤害。
 
 ## 相关
-- [00-design-principles.md](00-design-principles.md) — session.json 是 SSOT 的物理位置
-- [04-msal-graph-pattern.md](04-msal-graph-pattern.md) — Graph API + AppFolder + If-Match
-- [07-offline-persistence.md](07-offline-persistence.md) — 离线模式更完整的兜底
+- [20260524-design-principles.md](20260524-design-principles.md) — session.json 是 SSOT 的物理位置
+- [20260524-msal-graph-pattern.md](20260524-msal-graph-pattern.md) — Graph API + AppFolder + If-Match
+- [20260524-offline-persistence.md](20260524-offline-persistence.md) — 离线模式更完整的兜底

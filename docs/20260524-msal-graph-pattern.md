@@ -176,8 +176,8 @@ if (blob.size <= 4 * 1024 * 1024) {
 - 写时 header `If-Match: <eTag>`
 - 远端被另一设备改过 → 返 412 → re-fetch + merge + retry
 
-见 [05-session-sync-throttle.md](05-session-sync-throttle.md) 的 mergeRemoteAndRetry。
+见 [20260524-session-sync-throttle.md](20260524-session-sync-throttle.md) 的 mergeRemoteAndRetry。
 
 ## 相关
-- [00-design-principles.md](00-design-principles.md) - AppFolder 是 SSOT 的物理位置
-- [05-session-sync-throttle.md](05-session-sync-throttle.md) - 写盘 + 冲突解决
+- [20260524-design-principles.md](20260524-design-principles.md) - AppFolder 是 SSOT 的物理位置
+- [20260524-session-sync-throttle.md](20260524-session-sync-throttle.md) - 写盘 + 冲突解决

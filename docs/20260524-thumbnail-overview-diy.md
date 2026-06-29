@@ -1,6 +1,6 @@
 # 自己 roll 的缩略图概览
 
-200 页论文需要 PPT 式的多页 overview 选页。pdf.js 不暴露 `PDFThumbnailViewer`(见 [01-pdfjs-gotchas.md](01-pdfjs-gotchas.md) 坑 2),只能自己写。**~100 行,IntersectionObserver 懒渲染,内存可控**。
+200 页论文需要 PPT 式的多页 overview 选页。pdf.js 不暴露 `PDFThumbnailViewer`(见 [20260524-pdfjs-gotchas.md](20260524-pdfjs-gotchas.md) 坑 2),只能自己写。**~100 行,IntersectionObserver 懒渲染,内存可控**。
 
 ## 整体结构
 
@@ -47,7 +47,7 @@ CSS Grid 自适应:
 }
 ```
 
-⚠ **CSS specificity 坑**:用 `.thumb-container` (class) 而不是 `#thumbContainer` (id) 写 `display: grid`,否则 ID 选择器比 `.thumb-container.hidden` 高一档,**永远 grid → 永远覆盖在 viewer 上,看起来 night 模式黑屏**。见 [09-css-layout-traps.md](09-css-layout-traps.md) 坑 1。
+⚠ **CSS specificity 坑**:用 `.thumb-container` (class) 而不是 `#thumbContainer` (id) 写 `display: grid`,否则 ID 选择器比 `.thumb-container.hidden` 高一档,**永远 grid → 永远覆盖在 viewer 上,看起来 night 模式黑屏**。见 [20260524-css-layout-traps.md](20260524-css-layout-traps.md) 坑 1。
 
 ## 建骨架 + 装 IO
 
@@ -210,5 +210,5 @@ function clearOverview() {
 textbook 用户(进概览翻 500 页)可能爆。**未来 mitigation**:加 IntersectionObserver 反方向 unobserve + 释放 canvas placeholder。MVP 不做。
 
 ## 相关
-- [01-pdfjs-gotchas.md](01-pdfjs-gotchas.md) — 为什么 pdf.js 内置 thumbnail viewer 用不了
-- [09-css-layout-traps.md](09-css-layout-traps.md) — `.thumb-container` vs `#thumbContainer` 黑屏 bug
+- [20260524-pdfjs-gotchas.md](20260524-pdfjs-gotchas.md) — 为什么 pdf.js 内置 thumbnail viewer 用不了
+- [20260524-css-layout-traps.md](20260524-css-layout-traps.md) — `.thumb-container` vs `#thumbContainer` 黑屏 bug

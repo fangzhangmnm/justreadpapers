@@ -115,5 +115,5 @@ window.addEventListener("resize", refit);
 以后还出"宽度不对"投诉,**先 console.log naturalCssWidth、availCss、targetCss、s、render 后 page DOM 宽度**,数字对一遍最快。
 
 ## 相关
-- [01-pdfjs-gotchas.md](01-pdfjs-gotchas.md) — 96/72 单位坑细节
-- [10-device-compat.md](10-device-compat.md) — Quest / iOS / 4K 各自的 quirks
+- [20260524-pdfjs-gotchas.md](20260524-pdfjs-gotchas.md) — 96/72 单位坑细节
+- [20260524-device-compat.md](20260524-device-compat.md) — Quest / iOS / 4K 各自的 quirks

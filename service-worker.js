@@ -1,6 +1,6 @@
 // JRP service worker —— 抄 WebPaint sw shell(1:1 结构,只改 bundle 名 jrp- + precache 列表)。
 // content-hash bundle → cache name 自动随 build 失效(无手动 version)。install 时 fetch index.html
-// 抠出当前 bundle 文件名 → precache。论证见 WebPaint docs/why-content-hash-bundle.md。
+// 抠出当前 bundle 文件名 → precache。论证见 WebPaint docs/20260529-why-content-hash-bundle.md。
 //
 // 跟家族抄:基本 1:1 拷,改 STATIC_PRECACHE + bundle 名前缀就行。
 // 注意:install/hash regex 必须跟 build.sh 的 bundle 名(jrp-)一致,否则装不上→服旧缓存。

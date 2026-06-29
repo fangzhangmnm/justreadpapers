@@ -124,5 +124,5 @@ cache.set(item.id, blob, { name: item.name, eTag: item.eTag });
 MVP 没做,留着。
 
 ## 相关
-- [00-design-principles.md](00-design-principles.md) — PDF 是 cache,session 是 asset
-- [07-offline-persistence.md](07-offline-persistence.md) — cache meta 兼当 offline paper list
+- [20260524-design-principles.md](20260524-design-principles.md) — PDF 是 cache,session 是 asset
+- [20260524-offline-persistence.md](20260524-offline-persistence.md) — cache meta 兼当 offline paper list
