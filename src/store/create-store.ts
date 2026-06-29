@@ -81,7 +81,7 @@ export function createStore(config: StoreConfig) {
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
-  const offloadMod = createOffload({ cloud, local, head, isOnline });
+  const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
@@ -145,10 +145,10 @@ export function createStore(config: StoreConfig) {
     };
     return {
       async save(bytes) {
-        head.recordEdit(name);
+        head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
-        await local.save(name, sealed);
+        await sub.serialize(name, () => local.save(name, sealed));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError?.(e); }
       },

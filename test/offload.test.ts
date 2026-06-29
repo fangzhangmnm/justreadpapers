@@ -70,6 +70,20 @@ test("[offload] 云端 0B incomplete → 抛（不可信，绝不据此丢本地
   assert(s.localSet.has("a.pdf"), "本地还在");
 });
 
+test("[offload] TOCTOU：fetchMeta 网络期内并发 save 标脏 → re-check 拒，绝不 hardDelete 未推字节（C2 红线，对齐 freshness.ts:87）", async () => {
+  const localSet = new Set<string>(["a.pdf"]);
+  const dirtySet = new Set<string>();
+  const off = createOffload({
+    // fetchMeta 在 await 中把文件标脏 = 模拟并发 file.save 的 recordEdit 落在 offload 的网络窗口内。
+    cloud: { fetchMeta: async (_n: string) => { dirtySet.add("a.pdf"); return { etag: "e", lastModified: 0, size: 10, item: {} as any }; } },
+    local: { exists: async (n: string) => localSet.has(n), hardDelete: async (n: string) => { localSet.delete(n); } },
+    head: { isDirty: (n: string) => dirtySet.has(n), seenBase: () => "e", forget: () => {} },
+    isOnline: () => true,
+  });
+  await rejects(() => off.offload("a.pdf"), "dirty", "fetchMeta 后 re-check 抓到并发标脏");
+  assert(localSet.has("a.pdf"), "未推字节还在（re-check 拒在 hardDelete 之前，绝没丢）");
+});
+
 test("[offload] 未缓存 → no-op（无事可做，不抛）", async () => {
   const s = setup();
   await s.off.offload("a.pdf");  // 不抛
