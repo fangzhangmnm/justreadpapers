@@ -26,7 +26,7 @@ test("safePull dirty → 先备份再覆盖（backupName 有）", async () => {
   await cloud.push("f", enc("CLOUD"));          // 云端有 CLOUD
   await local.save("f", enc("OLD"));            // 本地旧版
   head.recordEdit("f");                         // 标脏 → 必须备份
-  const sr = createSafeResolve({ cloud, local, head });
+  const sr = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const r = await sr.safePull("f");
   assert(r.ok, "safePull ok");
   assert(!!(r.ok && r.backupName), "dirty → 有备份");
@@ -37,7 +37,7 @@ test("safePull clean → 跳备份（backupName 无）", async () => {
   const { cloud, local, head } = rig();
   await cloud.push("f", enc("CLOUD"));
   await local.save("f", enc("OLD"));            // clean（没 recordEdit）
-  const sr = createSafeResolve({ cloud, local, head });
+  const sr = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const r = await sr.safePull("f");
   assert(r.ok && !r.backupName, "clean → 不备份（ADR-0016）");
 });
@@ -57,7 +57,7 @@ test("tryHeal：云端字节==本地推的 → 自愈 true + 清脏（B5）", as
   const { cloud, local, head } = rig();
   await cloud.push("f", enc("B"));
   head.recordEdit("f");
-  const sr = createSafeResolve({ cloud, local, head });
+  const sr = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   assert(await sr.tryHeal("f", enc("B")), "字节相等 → 自愈");
   assert(!head.isDirty("f"), "自愈后清脏");
   assert(!(await sr.tryHeal("f", enc("C"))), "字节不等 → 不自愈");
@@ -66,7 +66,7 @@ test("tryHeal：云端字节==本地推的 → 自愈 true + 清脏（B5）", as
 test("weakOverride（keepMine）：force-push 本地，云端变本地版", async () => {
   const { cloud, local, head } = rig();
   await cloud.push("f", enc("CLOUD"));
-  const sr = createSafeResolve({ cloud, local, head });
+  const sr = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   await sr.weakOverride("f", enc("MINE"));
   const pulled = await cloud.pull("f");
   eq(await asStr(pulled?.blob), "MINE", "云端被 force 成本地版");
@@ -77,7 +77,7 @@ test("resolveConflict 派发：takeCloud/keepMine/cancel", async () => {
   await cloud.push("f", enc("CLOUD"));
   await local.save("f", enc("MINE"));
   head.recordEdit("f");
-  const sr = createSafeResolve({ cloud, local, head });
+  const sr = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
 
   const cancel = await sr.resolveConflict("f", "cancel");
   eq(cancel.status, "cancelled", "cancel 什么都不动");

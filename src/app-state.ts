@@ -35,16 +35,7 @@ export function answerConflict(choice: ConflictChoice): void {
   conflictUi.open = false; const r = _conflictResolve; _conflictResolve = null; if (r) r(choice);
 }
 
-// ── 密码 sheet（加密文件解锁/保存时 store 驱动；store 保证非交互永不弹框，这里只取一次输入）──
-export const passwordUi = reactive({ open: false, name: "", reason: "", input: "" });
-let _pwResolve: ((pw: string | null) => void) | null = null;
-function askPasswordUi(ctx: { name: string; reason: string }): Promise<string | null> {
-  passwordUi.input = ""; passwordUi.open = true; passwordUi.name = ctx.name; passwordUi.reason = ctx.reason;
-  return new Promise<string | null>((res) => { _pwResolve = res; });
-}
-export function answerPassword(pw: string | null): void {
-  passwordUi.open = false; passwordUi.input = ""; const r = _pwResolve; _pwResolve = null; if (r) r(pw);
-}
+// 加密密码不走 store ui（非交互 crypt.getPassword；JRP 不加密）→ 无密码 sheet。要加密的 app 在 busy 外自管解锁循环。
 
 // ── 云检查「跳过到离线」逃生闸（store 在 open 的 freshness 检查时驱动；红线：离线/挂死绝不卡 open）──
 // fetchMeta 挂死（iOS 登录态老 token acquireTokenSilent iframe）时，用户点「跳过到离线」→ 立即读本地。
@@ -78,7 +69,7 @@ function setSaveState(s: "dirty" | "saving" | "saved"): void {
 let _p: Persistence | null = null;
 /** 懒装配 persistence(首次用时建;createOneDriveProvider 只配置不连网,安全)。错误/保存态注入回 appUi。 */
 export function persistence(): Persistence {
-  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, askPassword: askPasswordUi, offlineEscape: offlineEscapeUi });
+  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, offlineEscape: offlineEscapeUi });
   return _p;
 }
 /** 设备本地设置面(zoom factor / spread / theme)。app 调这个,不碰 localStorage。 */

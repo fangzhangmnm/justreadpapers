@@ -47,7 +47,7 @@ const store = createStore({
   ui,                                        // 必填：UI 回调 bundle，store 在决策点回调进来（见 §7）
   keepOnOpen: true,                          // 选填(默认 true)：消费模式。true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地，§2；range 按需取片是 ⚠TODO 优化)
   syncedSettingsFileName: "settings.json",   // 选填：要跨设备同步设置时给（§4）
-  validateAdopt,                             // **编辑器/珍贵数据类必填**：采纳云端字节前验是不是真容器（防损坏/HTML 拿合法 etag 覆盖唯一好本地=丢画）。只读镜像(可重下)可不给。
+  validateAdopt,                             // **所有 consumer 必填，禁 placeholder/noop**：采纳云字节覆盖本地前验真内容（PDF/.ora）。**库对加密透明 → 验的是解密后明文**。防损坏/captive-portal HTML 拿合法 etag 覆盖好本地=丢内容。
   // ── 加密（§5）：JRP 不加密就不给（dormant，省 1.6MB）──
   // crypto: myCodec,                        // 选填：app 注入的 zip/7z codec（不注入 = 加密不可用）
   // crypt: { ext, getPassword, makePeek },  // 选填：扩展名 + 非交互密码源 + peek 派生
@@ -210,19 +210,20 @@ push-serialize（每文件串行推）· If-Match（每次写带 etag，412 → 
 
 store **不画像素**（无 DOM、无 `alert/confirm`），但它**驱动整个 flow**，在每个决策点**回调进你注入的 `ui` 并 await**——你不处理，flow 就过不去。这就是强制力：不是 store 替你画对话框，是**没解决就完不成这次写**。
 
-### 必填注入 `ui`（store 在这些时机回调进来）
+### 必填注入 `ui`（store 在这些时机回调进来）—— **全部必填，禁 placeholder/noop**（缺真 UI 就老实做或 escalate）
 ```ts
 const ui = {
   // 危险写操作的锁屏遮罩：store 把每个写裹进来。你画一个吞输入的全屏遮罩即可。
   busy: <T>(label: string, fn: () => Promise<T>) => Promise<T>,
-  // 需要密码时 store 调它；返回 pw 或 null(取消)。store 内部验，错了再调，直到对/取消。
-  askPassword: (ctx: { name: string; reason: "open" | "save" | "unlock" }) => Promise<string | null>,
-  // push 撞冲突时 store 调它；返回有限选项之一，后果由 store 执行(见下表)。
-  resolveConflict: (ctx: { name: string; local: Blob; cloud: Blob }) => Promise<ConflictChoice>,
-  // 非阻断错误(网络/文件不存在/字节非法)：store 调它弹 error banner。
-  reportError: (err: StoreError) => void,
+  // push 撞冲突时 store 调它；返回有限选项之一，后果由 store 执行(见下表)。**必给真 sheet，绝不静默 cancel**。
+  resolveConflict: (ctx: { name: string; local: Blob | null; cloud: Blob | null }) => Promise<ConflictChoice>,
+  // 非阻断错误(网络/文件不存在/字节非法)：store 调它弹 error banner。**必给，绝不吞 console**。
+  reportError: (err: unknown) => void,
+  // 选填：云检查「跳过到离线」逃生闸（缺它优雅退回 isOnline 守卫，非隐藏失败）。
+  offlineEscape?: () => { probe: Promise<unknown>; settle: () => void },
 };
 ```
+> **加密密码不走 ui**（无 `askPassword`）：非交互 `crypt.getPassword`（只读内存），解锁循环（prompt→`file.verifyPassword`→存密码→重跑）是 app 在 busy 外自管的事（§5）。
 
 ### 冲突的有限选项 + 后果（store 执行，app 只渲染那几个按钮）
 | `ConflictChoice` | store 做什么 |
@@ -232,7 +233,7 @@ const ui = {
 | `"cancel"` | 什么都不动；本地保持脏，下个周期再试 |
 
 ### store 编排的两条硬律（Model B 的代价 = 它的卖点）
-1. **先退 busy 遮罩、再弹 modal**：store 调 `askPassword`/`resolveConflict` 前先退出 busy 遮罩，否则遮罩盖住对话框 = 死锁（WebPaint 踩过）。这套交错归 store 管、一次做对。
+1. **先退 busy 遮罩、再弹 modal**：store 调 `resolveConflict` 前先退出 busy 遮罩，否则遮罩盖住对话框 = 死锁（WebPaint 踩过）。这套交错归 store 管、一次做对。（密码同理：app 的解锁循环也在 busy 外。）
 2. **await 期间 push-lock 安全**：flow 卡在回调 await 上时，同文件后续 push 排队、不死锁、不丢。
 
 ### 原子性不变量（#76）

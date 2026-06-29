@@ -19,7 +19,7 @@ function rig() {
   const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n: string) => n });
   const local = createMockLocal();
   const head = createLocalHead({ kv: memKv(), getCloudEtag: (n: string) => cloud.getETag(n) });
-  const safeResolve = createSafeResolve({ cloud, local, head });
+  const safeResolve = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const { open, refresh } = createFreshness({ cloud, head, safeResolve });
   return { cloud, local, head, open, refresh };
 }
@@ -43,7 +43,7 @@ test("open in-sync 重捕 _base：reload 后 dirty(内存 _base/_parent 空)→ 
   const head = createLocalHead({ kv: headKv, getCloudEtag: (n: string) => cloud.getETag(n) });
   const local = createMockLocal();
   await local.save("f", enc("MINE"));
-  const safeResolve = createSafeResolve({ cloud, local, head });
+  const safeResolve = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const { open } = createFreshness({ cloud, head, safeResolve });
   assert(head.isDirty("f"), "reload 后仍 dirty(kv durable)");
   // 修前：open in-sync 不 markSeen → _base/_parent 空 → ifMatchFor 走 no-base(null) → 推送 fail → 误报 collision。

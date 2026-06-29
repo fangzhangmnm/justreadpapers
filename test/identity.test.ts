@@ -22,7 +22,7 @@ function rig() {
   const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n: string) => n });
   const local = createMockLocal();
   const head = createLocalHead({ kv: memKv(), getCloudEtag: (n: string) => cloud.getETag(n) });
-  const safeResolve = createSafeResolve({ cloud, local, head });
+  const safeResolve = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const sub = createSubstrate();
   const { doPush } = createPush({ cloud, head, seal: sealPass, safeResolve, serialize: sub.serialize, editVersion: () => 0 });
   const id = createIdentity({ cloud, local, head, doPush, serialize: sub.serialize, serialize2: sub.serialize2 });
@@ -76,6 +76,18 @@ test("rename dirty + 旧名 trash 失败 → oldCloudOrphan（surface 不吞，�
   const r = await rename("old.pdf", "new.pdf");
   assert(r.oldCloudOrphan, "旧名 trash 失败 → oldCloudOrphan=true（surface 让 caller 处理）");
   eq(await asStr((await cloud.pull("new.pdf"))?.blob), "EDITED", "新名已推成功（不因旧名 trash 失败回滚）");
+});
+
+test("rename dirty + 云推失败 → cloudDeferred + newName 标脏（待推，下次 sync 自动收敛，不必重跑 rename）", async () => {
+  const { provider, cloud, local, head, rename } = rig();
+  await cloud.push("old.pdf", enc("ORIG"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");
+  provider.injectFault({ op: "upload", kind: "error", status: 500, times: 99 });   // 云推全失败（耗尽 retry）
+  const r = await rename("old.pdf", "new.pdf");
+  assert(r.cloudDeferred, "云推失败 → cloudDeferred（surface）");
+  assert(await local.exists("new.pdf"), "本地已是 new.pdf");
+  assert(head.isDirty("new.pdf"), "newName 标脏=待推（下次 push 自动带走 → 自动收敛，不必重跑 rename）");
 });
 
 test("rename：encode 抛错 → 旧名本地不丢（phantom-path：先存新再删旧，没存成就没删）", async () => {

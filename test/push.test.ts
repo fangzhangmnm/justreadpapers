@@ -22,7 +22,7 @@ function rig() {
   const local = createMockLocal();
   const headKv = memKv();
   const head = createLocalHead({ kv: headKv, getCloudEtag: (n: string) => cloud.getETag(n) });
-  const safeResolve = createSafeResolve({ cloud, local, head });
+  const safeResolve = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
   const sub = createSubstrate();
   let ver = 0;
   const { push } = createPush({ cloud, head, seal: sealPass, safeResolve, serialize: sub.serialize, editVersion: () => ver });

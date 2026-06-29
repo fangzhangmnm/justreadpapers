@@ -15,7 +15,7 @@ async function asStr(x: unknown): Promise<string | null> {
 function mkStore(provider: CloudProvider) {
   return createStore({
     provider,
-    ui: { busy: (_l, fn) => fn() },
+    ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} },
     local: createMockLocal(),
     kv: memKv(),
     syncedSettingsFileName: "settings.json",
@@ -63,7 +63,7 @@ test("keepOnOpen:false 过路 open：拉云返字节但不落本地（#5）", as
   const provider = createMockProvider();
   await mkStore(provider).file("papers/wei.pdf", { isZip: false }).save(enc("PDFBYTES"));   // A 存云
   const localB = createMockLocal();
-  const B = createStore({ provider, ui: { busy: (_l, fn) => fn() }, local: localB, kv: memKv(), keepOnOpen: false });
+  const B = createStore({ provider, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, local: localB, kv: memKv(), keepOnOpen: false });
   const blob = await B.file("papers/wei.pdf", { isZip: false }).open();
   eq(await asStr(blob), "PDFBYTES", "过路也能读回云端字节");
   assert(!(await B.file("papers/wei.pdf", { isZip: false }).isKeptOffline()), "过路 open 不落本地（isKeptOffline=false）");
@@ -99,7 +99,7 @@ test("离线 open：isOnline=false → 不碰 fetchMeta、直接读本地（离�
     ...provider,
     getItemByPath: (p) => (hang ? new Promise<never>(() => {}) : provider.getItemByPath(p)),
   };
-  const s = createStore({ provider: hangProvider, local, kv: memKv(), isOnline: () => online, ui: { busy: (_l, fn) => fn() } });
+  const s = createStore({ provider: hangProvider, local, kv: memKv(), isOnline: () => online, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} } });
   const f = s.file("a.pdf", { isZip: false });
   await f.save(enc("X"));              // 在线存（推云）
   online = false; hang = true;         // 离线 + fetchMeta 会挂死

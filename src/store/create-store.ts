@@ -24,10 +24,11 @@ import { createLocalCache } from "./local-cache.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
+  // **全部必填，禁 placeholder/noop**（offlineEscape 例外：缺它优雅退回 isOnline 守卫，非隐藏失败）。
   busy: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
-  askPassword?: (ctx: { name: string; reason: "open" | "save" | "unlock" }) => Promise<string | null>;
-  resolveConflict?: (ctx: { name: string; local: Blob | null; cloud: Blob | null }) => Promise<ResolveChoice>;
-  reportError?: (err: unknown) => void;
+  resolveConflict: (ctx: { name: string; local: Blob | null; cloud: Blob | null }) => Promise<ResolveChoice>;  // 冲突必 surface：consumer 必须给真 sheet，绝不静默 cancel
+  reportError: (err: unknown) => void;                                                                          // 错误必 surface：绝不吞 console
+  // 加密密码**不走 ui**——非交互 crypt.getPassword（app 持内存密码 + 解锁循环在 busy 外，见 §5/§7）。故无 askPassword。
   // 可选：云端检查（freshness gate）的「跳过到离线」逃生闸（对齐 WebPaint：无硬超时，用户即超时）。
   // store 在 open 的 freshness 检查前调，拿 probe 与 fetchMeta race；用户点「跳过到离线」→ probe resolve → 读本地
   //   （iOS 登录态老 token acquireTokenSilent iframe 永不 resolve→fetchMeta 挂死时的唯一逃生）。
@@ -52,11 +53,11 @@ export interface StoreConfig {
   kv?: Kv;
   local?: LocalCache;
   getPassword?: (name: string) => string | null;   // 旧顶层密码源（向后兼容；优先用 crypt.getPassword）
-  // 采纳云端字节前的有效性闸（N2：clean 快进/pull 覆盖本地前调）。store 格式盲、自己验不了内容 →
-  //   **编辑器/珍贵数据类消费者（如 WebPaint 画作）必须注入**（验是不是真 .ora/zip 容器），否则损坏/captive-portal
-  //   HTML 拿着合法 etag 能覆盖唯一好的本地副本 = 丢画（静态验证 2026-06-28 标定的唯一残留 不丢画 缺口）。
-  //   只读镜像类（JRP PDF，可重下）可不给。
-  validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
+  // 采纳云端字节前的有效性闸（N2：clean 快进/pull 覆盖本地前调）——**所有 consumer 必传，禁 placeholder/noop**。
+  //   store 格式盲、自己验不了内容 → 逻辑 app 给（验是不是真 PDF/.ora/zip）。否则损坏/captive-portal HTML 拿着
+  //   合法 etag 能覆盖唯一好的本地副本 = 丢内容（论文/画作都怕；只读消费者不上传不伤云，但机场网毁缓存照样难看）。
+  //   **库对加密透明**：验的是**解密后的明文**（你看真 PDF/.ora，不是密文容器）。
+  validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
 }
@@ -120,7 +121,7 @@ export function createStore(config: StoreConfig) {
     cloud, local, head,
     localDirty: () => sub.edits.localDirty(),
     validateAdopt,
-    unseal: async (n, blob) => (await seal.unsealForRead(n, blob)) ?? blob,
+    unseal: (n, blob) => seal.unsealForRead(n, blob),   // 返明文；加密但锁定 → null（safePull 退验封套）
     looksEncrypted: (b) => looksEncryptedContainer(b),
   });
   const pushMod = createPush({ cloud, head, seal, safeResolve, serialize: sub.serialize, editVersion: () => sub.edits.version(), busy: ui.busy });
@@ -150,9 +151,8 @@ export function createStore(config: StoreConfig) {
   const delSF = singleFlight("删除", (n: string) => del.del(n, { isOnline }));   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
   const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
 
-  // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（默认 cancel=留 dirty）──
+  // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（必填，绝不静默 cancel）──
   const onConflict = async ({ name }: { name: string }): Promise<ResolveChoice> => {
-    if (!ui.resolveConflict) return "cancel";
     const [localBlob, cloudPull] = await Promise.all([local.get(name), cloud.pull(name).catch(() => null)]);
     return ui.resolveConflict({ name, local: localBlob, cloud: cloudPull?.blob ?? null });
   };
@@ -244,7 +244,7 @@ export function createStore(config: StoreConfig) {
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
-        catch (e) { ui.reportError?.(e); }
+        catch (e) { ui.reportError(e); }
       },
       async open() {
         if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
@@ -252,7 +252,7 @@ export function createStore(config: StoreConfig) {
           // offlineEscape：在线但 fetchMeta 挂死（iOS 老 token iframe）时，用户点「跳过到离线」→ probe 赢 race → 读本地。
           //   对齐 WebPaint cloud-freshness「跳过到离线」（无硬超时，用户即超时）。不立即返缓存=防云端变了再采纳的闪。
           const esc = isOnline() ? ui.offlineEscape?.() : undefined;
-          try { await fresh.open(name, { isOnline, probe: esc?.probe }).catch((e) => ui.reportError?.(e)); }
+          try { await fresh.open(name, { isOnline, probe: esc?.probe }).catch((e) => ui.reportError(e)); }
           finally { esc?.settle(); }
           return readLocal();
         }
@@ -261,7 +261,7 @@ export function createStore(config: StoreConfig) {
           return readLocal();
         }
         // 本地没有、过路模式（keepOnOpen:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
-        const pulled = await cloud.pull(name).catch((e) => { ui.reportError?.(e); return null; });
+        const pulled = await cloud.pull(name).catch((e) => { ui.reportError(e); return null; });
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
       async rename(newName) { await renameSF(name, newName); },
@@ -269,7 +269,7 @@ export function createStore(config: StoreConfig) {
       isDirty() { return head.isDirty(name); },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
-        if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError?.(e); } }
+        if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError(e); } }
       },
       offload() { return offloadMod.offload(name); },
       isEncrypted() { return encIsEncrypted(name); },

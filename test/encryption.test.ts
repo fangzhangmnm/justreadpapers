@@ -46,7 +46,7 @@ const fakeCodec: CryptoCodec = {
 function mkStore(pw: string | null, makePeek?: (b: Blob) => Promise<Uint8Array | null>) {
   return createStore({
     provider: createMockProvider(), local: createMockLocal(), kv: memKv(),
-    ui: { busy: (_l, fn) => fn() },
+    ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} },
     crypto: fakeCodec,
     crypt: { ext: "pdf", getPassword: () => pw, makePeek },
   });
@@ -70,11 +70,11 @@ test("[enc] encrypt → isEncrypted → open 透明解 → decrypt 往返（at-r
 
 test("[enc] 无密码：open 加密文件 → null(locked)，save → 抛 LOCKED（绝不静默存明文）", async () => {
   const local = createMockLocal(), kv = memKv(), provider = createMockProvider();
-  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "pw" } });
+  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "pw" } });
   const fa = A.file("x.pdf", { isZip: false });
   await fa.save(enc("DATA")); await fa.encrypt();
   // 同 local/kv/provider 的另一个 store，但无密码源（模拟未解锁的会话）：
-  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => null } });
+  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => null } });
   const fb = B.file("x.pdf", { isZip: false });
   eq(await fb.open(), null, "无密码 open 加密文件 → null(locked)，不弹窗");
   let lockedThrow = false;
@@ -100,7 +100,7 @@ test("[enc] getPreview：makePeek 写的 peek 读得回（ZipFile）", async () 
 });
 
 test("[enc] 不注入 codec → dormant：明文文件正常，packContainer 不被触发", async () => {
-  const s = createStore({ provider: createMockProvider(), local: createMockLocal(), kv: memKv(), ui: { busy: (_l, fn) => fn() } });   // 无 crypto/crypt
+  const s = createStore({ provider: createMockProvider(), local: createMockLocal(), kv: memKv(), ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} } });   // 无 crypto/crypt
   const f = s.file("plain.pdf", { isZip: false });
   await f.save(enc("PLAIN"));
   assert(!(await f.isEncrypted()), "明文");
@@ -136,12 +136,12 @@ test("[enc] 曾同步 + 离线 → encrypt 拒（status:offline），两端原�
 
 test("[enc] 错密码 decrypt → status:locked，字节零持久副作用（仍是容器，没落明文）", async () => {
   const local = createMockLocal(), kv = memKv(), provider = createMockProvider();
-  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "right" } });
+  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "right" } });
   const fa = A.file("wp.pdf", { isZip: false });
   await fa.save(enc("SECRET")); await fa.encrypt();
   const before = await (await A._internal.cloud.pull("wp.pdf").then((p) => p!.blob)).arrayBuffer();
   // 无/错密码的会话尝试 decrypt：
-  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "wrong" } });
+  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "wrong" } });
   const r = await B.file("wp.pdf", { isZip: false }).decrypt();
   eq(r.status, "locked", "错密码 decrypt → locked（不解）");
   assert(await A.file("wp.pdf", { isZip: false }).isEncrypted(), "本地仍是容器（没落明文）");
@@ -163,10 +163,10 @@ test("[enc] 字节逐位还原：明文→encrypt→decrypt→明文 byte-exact"
 
 test("[enc] 锁定时 getPreview → null（图库批量渲染绝不弹密码）", async () => {
   const local = createMockLocal(), kv = memKv(), provider = createMockProvider();
-  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "pw", makePeek: async () => enc("THUMB") } });
+  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "pw", makePeek: async () => enc("THUMB") } });
   const fa = A.file("pk.pdf", { isZip: false });
   await fa.save(enc("BODY")); await fa.encrypt();
-  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => null } });
+  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {} }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => null } });
   eq(await B.file("pk.pdf", { isZip: true }).getPreview(), null, "无密码 getPreview → null（不弹窗、不抛）");
 });
 

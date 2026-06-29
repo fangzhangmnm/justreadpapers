@@ -5,7 +5,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, passwordUi, answerPassword, cloudCheckUi, skipToOffline } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, cloudCheckUi, skipToOffline } from "../app-state.ts";
 import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -303,7 +303,7 @@ export const App = defineComponent({
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup, dragActive,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, onGalFolderChange, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
-      conflictUi, answerConflict, passwordUi, answerPassword, cloudCheckUi, skipToOffline,
+      conflictUi, answerConflict, cloudCheckUi, skipToOffline,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -394,16 +394,6 @@ export const App = defineComponent({
           <button class="jrp-btn" @click="answerConflict('cancel')">先不动</button>
           <button class="jrp-btn" @click="answerConflict('takeCloud')">用云端</button>
           <button class="jrp-btn jrp-btn-dark" @click="answerConflict('keepMine')">保留我的</button>
-        </div>
-      </div>
-      <div class="jrp-confirm-backdrop" v-if="passwordUi.open"></div>
-      <div class="jrp-confirm" v-if="passwordUi.open">
-        <div class="jrp-confirm-title">需要密码</div>
-        <div class="jrp-confirm-body">「{{ passwordUi.name }}」是加密文件，输入密码。</div>
-        <input class="jrp-gal-edit" type="password" v-model="passwordUi.input" @keydown.enter="answerPassword(passwordUi.input || null)" placeholder="密码" />
-        <div class="jrp-confirm-btns">
-          <button class="jrp-btn" @click="answerPassword(null)">取消</button>
-          <button class="jrp-btn jrp-btn-dark" @click="answerPassword(passwordUi.input || null)">确定</button>
         </div>
       </div>
       <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div><button class="jrp-btn jrp-busy-skip" v-if="cloudCheckUi.skippable" @click="skipToOffline">跳过到离线</button></div>

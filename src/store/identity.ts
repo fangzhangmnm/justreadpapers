@@ -19,7 +19,7 @@ type PushFn = (name: string, opts: { encode: () => BytesSource | Promise<BytesSo
 export interface IdentityCfg {
   cloud: Pick<CloudSync, "fetchMeta" | "rename" | "getETag" | "pull" | "trash">;
   local?: Pick<LocalCache, "exists" | "get" | "save" | "hardDelete">;
-  head: Pick<LocalHead, "isDirty" | "markSeen" | "markSynced" | "forget">;
+  head: Pick<LocalHead, "isDirty" | "markSeen" | "markSynced" | "forget" | "recordEdit">;
   doPush: PushFn;   // 未串行版（identity 已在自己 serialize/serialize2 段内，调串行 push 会同名自锁）
   serialize: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   serialize2: <T>(a: string, b: string, fn: () => Promise<T>) => Promise<T>;
@@ -66,6 +66,9 @@ export function createIdentity(cfg: IdentityCfg) {
         head.forget(oldName);
         return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, oldCloudOrphan };
       } catch (e) {
+        // 云端推失败（网络）→ 本地已是 newName，标脏让它成待推（下次 push/sync 自动带走 newName，
+        //   不必重跑 rename 才收敛）。_parent=null=新身份首推（conflictBehavior:fail，撞名 surface 不盲覆盖）。
+        head.recordEdit(newName);
         head.forget(oldName);
         return { status: "renamed", where: "local", newName, cloudDeferred: true, error: e };
       }

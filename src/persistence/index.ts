@@ -40,8 +40,7 @@ export interface PersistenceHooks {
   onError?: (msg: string) => void;
   onSaveState?: (s: SaveState) => void;
   onBusy?: (label: string | null) => void;   // 全屏遮罩驱动（store 危险写操作锁屏；label=进入、null=退出，ref-count 在 host）
-  resolveConflict?: NonNullable<StoreUI["resolveConflict"]>;   // 冲突 sheet（红线：冲突必 surface）；不给 → store 默认 cancel(留 dirty)
-  askPassword?: NonNullable<StoreUI["askPassword"]>;           // 密码输入（加密用，非交互永不弹框由 store 保证）；不给 → null
+  resolveConflict: StoreUI["resolveConflict"];                 // 冲突 sheet（红线：冲突必 surface，必传，绝不静默 cancel）
   offlineEscape?: NonNullable<StoreUI["offlineEscape"]>;       // 云检查「跳过到离线」逃生闸（fetchMeta 挂死时用户即超时）；不给 → 无逃生
 }
 
@@ -56,19 +55,26 @@ export interface Persistence {
   boot(): Promise<{ signedIn: boolean }>;
 }
 
-export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
+export function createPersistence(hooks: PersistenceHooks): Persistence {   // resolveConflict 必传（冲突必 surface）
   const { provider, auth } = createOneDriveProvider({
     clientId: cfg.CLIENT_ID, msalUrl: cfg.MSAL_URL, scopes: cfg.SCOPES, authority: cfg.AUTHORITY,
   });
-  // ui bundle（Model B）：busy = **全屏遮罩**（对齐 JRB，防书签乱闪/危险写操作误触）；冲突默认 cancel；错误 surface。
+  // ui bundle（Model B）：busy = **全屏遮罩**；冲突/错误必 surface（真 sheet / toast，不静默不吞 console）。
+  //   加密密码不走 ui（非交互 crypt.getPassword）；JRP 不加密、不注入 crypt → 无密码 UI。
   const ui: StoreUI = {
     busy: async (label, fn) => { hooks.onBusy?.(label); try { return await fn(); } finally { hooks.onBusy?.(null); } },
     reportError: (e) => { console.warn("[jrp][store]", e); hooks.onError?.("同步出错(已保留本地，稍后自动重试)"); },
-    resolveConflict: (ctx) => (hooks.resolveConflict ? hooks.resolveConflict(ctx) : Promise.resolve("cancel" as const)),
-    askPassword: (ctx) => (hooks.askPassword ? hooks.askPassword(ctx) : Promise.resolve(null)),
-    offlineEscape: hooks.offlineEscape,   // undefined → store 退回纯 isOnline 守卫（无逃生闸）
+    resolveConflict: hooks.resolveConflict,   // 必传：真冲突 sheet（app-state resolveConflictUi）
+    offlineEscape: hooks.offlineEscape,        // undefined → store 退回纯 isOnline 守卫（无逃生闸）
   };
-  const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配
+  // validateAdopt（必传，禁 placeholder）：采纳云端字节覆盖本地前验真 PDF（%PDF- magic）。
+  //   挡机场/captive-portal 200-HTML、损坏副本覆盖好缓存（论文丢了也麻烦）。库对加密透明 → 拿到的是
+  //   解密后明文（JRP 不加密=PDF 原文）。非 PDF 一律拒（绝不拿垃圾盖好本地；宁可不同步也不毁缓存）。
+  const validateAdopt = async (plain: Blob): Promise<boolean> => {
+    const h = new Uint8Array(await plain.slice(0, 5).arrayBuffer());
+    return h[0] === 0x25 && h[1] === 0x50 && h[2] === 0x44 && h[3] === 0x46 && h[4] === 0x2d;   // "%PDF-"
+  };
+  const store = createStore({ provider, ui, validateAdopt });   // local=idb、kv=localStorage 库内默认装配
 
   // 重连重放离线删队列（base-etag 守卫：被别处改过/同名新文件 → edit-wins 不删，绝不盲删别设备新文件）。
   //   单 app 单例，监听不卸；listGallery 也会 drain 一次（覆盖「离线删→重连后开图库」路径）。
