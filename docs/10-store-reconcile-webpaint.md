@@ -102,15 +102,33 @@ JRP 在**结构**上领先（深模块分解 + store-driven Model-B + offload/re
 
 每条：指到 enforce 它的模块 + 行号，论证「能否产生左栏坏结果」。
 
+### 4.1 审计结果（as-of 2026-06-28，3 个对抗 subagent 跑 skip-fixed 基线）
+
+- **场景 A（离线完美）**：红线轴 5 条全 **SAFE**。freshness 离线短路（`freshness.ts:44`）落在 fetchMeta/token 之前；离线删 null-base 守卫双重 enforce（`delete.ts:58,95`）。
+- **场景 B-1（push/冲突）**：6 条全 **SAFE**。每个分叉要么 412→surface、要么 byte-equal 自愈、要么 no-base collision 守卫，两侧都留。理论 silent-overwrite（markSeen 重捕 _parent 到 moved tip）**结构不可达**（markSeen 没接进 open/refresh）。
+- **场景 B-2（move-aside/驱逐/身份）**：C1/C3/C4/C5 SAFE；**C2 = HOLE，已修**（见下）。
+  - ⚠ **C3 前提**：`validateAdopt` 是可选 config，JRP **必须**注入（`create-store.ts` 经 `config.validateAdopt`）；不给 → clean 本地可被云端垃圾覆盖无备份。回传时确认 app 有接。
+
+**已修红线**：
+- ✅ **C2 offload TOCTOU（a97da5b）**：check-then-act 跨 fetchMeta + offload 不在 serialize → 并发 save 写的 dirty 字节被 hardDelete + 清 dirty 标志 = 最毒红线（驱逐吃未推字节）。修=offload 进同名 serialize 链（⟂ save 的 local 写）+ fetchMeta 后 re-check isDirty（抄 `freshness.ts:87`）+ save 的 local.save 也进 serialize。1 回归测。
+
+**backlog（审计副产，非数据安全红线）**：
+- **del 的 isOnline 未接**（`create-store.ts` delSF 调 `del.del(n)` 无 opts → `del` 内 isOnline 默认 true）→ 离线删队列 + base-etag 守卫是**死代码**，离线删不传播（重连云文件还在 → 重新出现）。安全（本地 move-aside、无丢数据），但功能缺。修=把 store 的 `isOnline` 接进 delSF。
+- **markSeen 没接进 open/refresh**（reload 一个 cached 文件后再编辑 → push 拿 If-Match=null → no-base "fail" → 可能误报 `CloudNameCollisionError`）。errs-safe（偏向不覆盖），但 UX wart。回传时对 WebPaint 接法（CONTEXT.md 称 open 应 markSeen）。
+
 ---
 
-## 5. 执行顺序（用户定）
+## 5. 执行顺序（用户定）& 进度
 
 1. ✅ **对账表**（本 doc）。
-2. **补退化**：3.1 skip-to-offline（纯 JRP 内修）→ 3.2 加密接线（红线，改前 escalate）→ 3.3 auth 修复（已在 JRP，回传时带走）。
-3. **subagent 静态论证红线**（§4 checklist，离线完美 + 重连不覆盖）。
-4. **逐模块回传 WebPaint**：先 verify parity 的（cloud-sync/local-cache/folder-*/providers diff）；再 JRP→WP 下沉（offload/reconcile/collection-cache + getToken 修复）；Model-B（3.4）按你 §3.4 的决定。WebPaint 红线为准，逐模块走 `pwa-cloud-store` skill。
+2. **补退化**：
+   - ✅ 3.1 skip-to-offline（28aabba，纯 JRP 内修，2 测，未真机验）。
+   - ⏳ 3.2 加密接线（红线 + 体量大；**JRP 本身不加密**，这是为回传 WebPaint 的库完整性——WebPaint 已有可用加密，回传时是把 WebPaint 的加密移植进 JRP 模块结构，不是 JRP 凭空造。**待 escalate 定 scope：现在做 vs 留回传阶段**）。
+   - ✅ 3.3 auth getToken 修复（已在 JRP/0caf386，回传时带去 WebPaint）。
+3. ✅ **subagent 静态论证红线**（§4.1，A/B 全 SAFE + 修了 C2 + 2 backlog）。
+4. **逐模块回传 WebPaint**：先 verify parity 的（cloud-sync/local-cache/folder-*/providers diff）；再 JRP→WP 下沉（offload/reconcile/collection-cache + getToken 修复 + C2 修）；Model-B（3.4）按你 §3.4 决定。WebPaint 红线为准，逐模块走 `pwa-cloud-store` skill。
 
-> 已落地：README §8 速查表旧名 `pin()/evict()`→`keepOffline()/offload()`（worktree 分支 `jrp-store-finalize`/4b8c1a0，未 merge 回 main，等收口批次一起落）。
+> 已落地（worktree 分支 `jrp-store-finalize`，未 merge 回 main，等收口批次一起落）：
+> `4b8c1a0` README §8 旧名修正 · `3b667ac` 本对账 doc · `28aabba` skip-to-offline · `a97da5b` C2 TOCTOU。
 </content>
 </invoke>
