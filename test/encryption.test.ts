@@ -107,6 +107,69 @@ test("[enc] 不注入 codec → dormant：明文文件正常，packContainer 不
   eq(await asStr(await f.open()), "PLAIN", "明文正常读写（加密 dormant）");
 });
 
+async function cloudIsEnc(s: ReturnType<typeof mkStore>, name: string): Promise<boolean> {
+  const b = await s._internal.cloud.pull(name).then((p) => p?.blob ?? null);
+  return b ? s.looksEncrypted(b) : false;
+}
+
+test("[enc] 两端一起换：encrypt 后云端也是容器、decrypt 后云端也回明文（v233 红线：绝不只换一端）", async () => {
+  const s = mkStore("pw");
+  const f = s.file("sync.pdf", { isZip: false });
+  await f.save(enc("BODY"));
+  await f.encrypt();
+  assert(await f.isEncrypted(), "本地是容器");
+  assert(await cloudIsEnc(s, "sync.pdf"), "云端也变容器（两端一起换，没只换本地）");
+  await f.decrypt();
+  assert(!(await f.isEncrypted()), "本地回明文");
+  assert(!(await cloudIsEnc(s, "sync.pdf")), "云端也回明文（两端一起换回）");
+});
+
+test("[enc] 曾同步 + 离线 → encrypt 拒（status:offline），两端原样（防只换一端的隐藏分叉）", async () => {
+  const s = mkStore("pw");
+  const f = s.file("off.pdf", { isZip: false });
+  await f.save(enc("BODY"));                        // 推过云 → tracked（有 etag）
+  const r = await f.encrypt({ isOnline: () => false });
+  eq(r.status, "offline", "曾同步但离线 → 拒");
+  assert(!(await f.isEncrypted()), "本地仍明文（没换）");
+  assert(!(await cloudIsEnc(s, "off.pdf")), "云端仍明文（没换）");
+});
+
+test("[enc] 错密码 decrypt → status:locked，字节零持久副作用（仍是容器，没落明文）", async () => {
+  const local = createMockLocal(), kv = memKv(), provider = createMockProvider();
+  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "right" } });
+  const fa = A.file("wp.pdf", { isZip: false });
+  await fa.save(enc("SECRET")); await fa.encrypt();
+  const before = await (await A._internal.cloud.pull("wp.pdf").then((p) => p!.blob)).arrayBuffer();
+  // 无/错密码的会话尝试 decrypt：
+  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "wrong" } });
+  const r = await B.file("wp.pdf", { isZip: false }).decrypt();
+  eq(r.status, "locked", "错密码 decrypt → locked（不解）");
+  assert(await A.file("wp.pdf", { isZip: false }).isEncrypted(), "本地仍是容器（没落明文）");
+  const after = await (await A._internal.cloud.pull("wp.pdf").then((p) => p!.blob)).arrayBuffer();
+  eq(new Uint8Array(after).length, new Uint8Array(before).length, "云端字节没动（零持久副作用）");
+});
+
+test("[enc] 字节逐位还原：明文→encrypt→decrypt→明文 byte-exact", async () => {
+  const s = mkStore("pw");
+  const f = s.file("rt.pdf", { isZip: false });
+  const orig = new Uint8Array([0, 1, 2, 255, 128, 0, 7, 7, 7]);   // 含 0 字节、非 utf8
+  await f.save(orig);
+  await f.encrypt();
+  await f.decrypt();
+  const back = new Uint8Array(await (await f.open())!.arrayBuffer());
+  eq(back.length, orig.length, "长度还原");
+  assert(back.every((b, i) => b === orig[i]), "字节逐位还原（含 0 字节/非 utf8）");
+});
+
+test("[enc] 锁定时 getPreview → null（图库批量渲染绝不弹密码）", async () => {
+  const local = createMockLocal(), kv = memKv(), provider = createMockProvider();
+  const A = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => "pw", makePeek: async () => enc("THUMB") } });
+  const fa = A.file("pk.pdf", { isZip: false });
+  await fa.save(enc("BODY")); await fa.encrypt();
+  const B = createStore({ provider, local, kv, ui: { busy: (_l, fn) => fn() }, crypto: fakeCodec, crypt: { ext: "pdf", getPassword: () => null } });
+  eq(await B.file("pk.pdf", { isZip: true }).getPreview(), null, "无密码 getPreview → null（不弹窗、不抛）");
+});
+
 test("[enc] looksEncrypted / verifyContainer / unsealWith（导入辅助）", async () => {
   const s = mkStore("imp-pw");
   const f = s.file("d.pdf", { isZip: false });

@@ -18,6 +18,7 @@ import "./collection-cache.test.ts";
 import "./offload.test.ts";
 import "./reconcile.test.ts";
 import "./encryption.test.ts";
+import "./crypto-container.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
 import { run } from "./_harness.ts";
