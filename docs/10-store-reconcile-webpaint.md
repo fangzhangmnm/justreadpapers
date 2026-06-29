@@ -1,0 +1,116 @@
+# Store 收口 + 回传 WebPaint —— 对账表 & 计划
+
+> as-of 2026-06-28 · 作者 = AI coding agent，人类监督依据
+> 本 doc 是缓存、无失效机制：与代码冲突时**信代码**，反直觉条目去人类语料/ADR 验出处。
+> 信任顺序：代码现状 > journal 人类原话 > ADR > 本 doc。
+
+## 0. 背景与方向（先读）
+
+- **库无中央仓**：各 app 互相拷代码（`MyPWAPatterns` 不是 SSoT，只有 README）。
+- **WebPaint = 红线 ground-truth**（store 行为对错以它为准）；**JRP = 结构最领先的 baked copy**（已把 WebPaint 的单体 `store.ts` 拆成 ~12 个深模块）。
+- **回传 = 双向 merge，不是单向拷贝**。两边各有对方没有/更好的东西（见 §2 方向列）。
+- 触及红线模块前必读 `src/store/DATA SAFETY GUIDELINE.md` 并 escalate human（硬规则）。
+
+### 一句话现状
+JRP 在**结构**上领先（深模块分解 + store-driven Model-B + offload/reconcile/collection-cache 下沉到库层），但有**自己的退化**（加密未接线、skip-to-offline 逃生闸丢失）。WebPaint 在**行为完整度**上领先（加密全实现、skip-to-offline 正确），但 store 是单体、eviction-guard/reconcile/conflict-UI 都散在 app 层（债）。
+
+---
+
+## 1. 架构对账（顶层）
+
+| 维度 | WebPaint（ground-truth，单体） | JRP（深模块分解，新） | 方向 |
+|---|---|---|---|
+| 结构 | `store.ts` 1054 行 god-closure + `folder-store.ts`(旧名) | 拆成 ~12 深模块 + `create-store.ts` 薄组合根 | 结构 JRP→WP（大重构） |
+| flow 编排 | **app 驱动**：`cloud-freshness.ts` 自管 busy/sync-gate/conflict dialog，store 只暴露 flow + 只读 state | **store 驱动 (Model B)**：busy/resolveConflict/askPassword 全在 store 内回调，app 只注入 `ui` bundle | TBD（最大风险，见 §3.4） |
+| 公共面 | `flow.{push,open,...}` + seal/peek/edit/autosave/cloud/settings 一堆原语 | `file(name,{isZip})`→RawFile/ZipFile 高层门面 + collection + reconcile | 随结构 |
+
+---
+
+## 2. 逐模块对账表
+
+> 方向：`JRP→WP` = 把 JRP 的分解/新能力带进 WebPaint；`WP→JRP` = JRP 退化，从 WebPaint 取回；`双向` = 都要；`parity` = 行为一致，只是 JRP 抽成独立模块。
+> 标 ⚠ = 回传前必处理的退化/缺口。
+
+| JRP 模块 | WebPaint 对应位置 | delta | 方向 |
+|---|---|---|---|
+| `create-store.ts`（组合根 + Model-B 门面） | `store.ts` 顶部 + 返回面（god-closure） | JRP 拆分 + Model-B；WP 单体 + app-driven | 结构 JRP→WP；Model-B = TBD |
+| `local-head.ts`（HEAD `_base`/parent/dirty 三合一） | `store.ts` inline（`_base` Map / `seenBase` / `parentFor`） | 抽成独立模块 vs inline | JRP→WP（抽取） |
+| `push.ts`（serial+If-Match+retry+conflict） | `store.ts` push (≈230) | 红线一致（parentBase If-Match、412→heal→surface、默认 cancel 无 LWW） | parity（抽取） |
+| `freshness.ts`（open/refresh gate） | `store.ts` open(321)/refresh(382) | ⚠ **JRP 没接 probe**（裸 await fetchMeta，遮罩能挂死）；WP `cloud-freshness.ts` 传 user-gesture probe | 抽取 JRP→WP；**probe 退化 WP→JRP** |
+| `delete.ts`（三态 move-aside + 离线删队列） | `store.ts` del(411) | parity（move-aside `.trash`、dirty 先降 local-only 不硬删、null base 不入队） | parity（抽取） |
+| `identity.ts`（rename/saveAs/acquire） | `store.ts` rename(591)/saveAs(639)/acquire(662) | parity（phantom-path 先存新再删旧、server move 保 etag） | parity（抽取） |
+| `trash.ts`（restore/purge/emptyTrash） | `store.ts` restore(506)/purge(531)/emptyTrash(552) | parity（restore 采纳新 etag、purge 强确认、批量失败聚合不吞） | parity（抽取） |
+| `offload.ts`（keepOffline/offload + eviction-guard） | **WebPaint 无**（offload/pin/evict API 不存在；clean-guard 在 app 层 `app-store.ts` reconcileCloudGone） | ⚠ **债 N4**：JRP 把 eviction-guard（dirty 永不驱逐、只 clean∧可重取）下沉到库层；WP 散在 app | JRP→WP（新增模块 + 下沉） |
+| `reconcile.ts`（cloud-gone 收敛 + 纯 classifier） | WebPaint **app 层**：`app-store.ts` reconcileCloudGone + `gallery-model.ts` classifyCloudGone | JRP 把 cloud-gone 收敛搬进库层（clean 孤儿→local-only 不删，partial/empty list 不动） | JRP→WP（app→store 下沉） |
+| `collection.ts`（+ IDB hydrate 本地缓存） | `folder-store.ts`（**memory+cloud only，无 IDB hydrate**） | ⚠ JRP 有透明本地缓存（离线读/强杀续存/init etag-skip 快路径）；WP 持久化甩给 app | JRP→WP（加 IDB hydrate + 改名 folder-store→collection） |
+| `safe-resolve.ts`（safePull/tryHeal/weakOverride/resolveConflict） | `store.ts` _safePull(242)/_tryHeal(158)/_resolveConflict | parity（backup-before-overwrite、validateAdopt 防 captive-portal、etag 在 save 成功后才推进 R1） | parity（抽取） |
+| `seal.ts` + `crypto-container.ts`（at-rest 加密） | `store.ts` _seal/_unseal/encryptFile/decryptFile + `crypto-container.ts`（**全实现**） | ⚠ **JRP 加密 inert/未接线**：crypto-container 的 peek 真 crypto 在，但 7z codec seam 没注入（`configureCryptoCodec` 没被调）、`getPassword=()=>null`、ZipFile preview `throw notYet`、`encryptionSaltFileName` ⚠TODO | **WP→JRP（接线加密）** |
+| `settings.ts`（localSettings + syncedSettings） | `store.ts` settings（通用 KV，无 syncedSettings collection） | JRP 多 syncedSettings（跨设备、collection per-key LWW） | JRP→WP（小，加 syncedSettings） |
+| `substrate.ts`（edits/session/serialize/serialize2） | `store.ts` substrate（edits/session 住这） | parity | parity（共用） |
+| `cloud-sync.ts`（session 级 cloud 语义） | `cloud-sync.ts`（同名） | 疑似近 parity（都有 fetchMeta/If-Match/move-aside/H7 size+tail 防冒认）；**需逐行 diff 确认** | verify parity |
+| `local-cache.ts` / `idb-store.ts` | `local-adapter.ts` | 需对比 API（backup/trash/hardDelete/appKeys 命名空间） | verify parity |
+| `folder-flow.ts` / `folder-merge.ts` / `move-aside.ts` | 同名文件 | 疑似 parity（folder-flow 有 15s withTimeout、merge 是 config-class 故意 LWW、move-aside guid 防撞） | verify parity |
+| `providers/auth.ts`（MSAL） | `providers/auth.ts` | ⚠ **WP 还是旧 bug**（auth.ts:193-196 getToken 后台 `acquireTokenRedirect`）；JRP 0caf386 已修（silent 失败 throw 降级离线，绝不后台跳转） | **JRP→WP（getToken 修复）** |
+| `providers/graph.ts` / `onedrive-provider.ts` | 同名 | 需对比（0B blob-coercion seam、chunked upload、conflictBehavior） | verify parity |
+
+---
+
+## 3. JRP 退化项 / 必补（回传前先在 JRP 补齐，再双向 merge）
+
+### 3.1 ⚠ skip-to-offline 逃生闸（WP→JRP，纯 JRP 内修，不碰 WebPaint）
+- **病**：`create-store.ts:152` `await fresh.open(name)` 不传 probe；遮罩 `busy("检查云端…")` 在 fetchMeta 挂死（iOS 登录态老 token acquireTokenSilent iframe 永不 resolve）时永久转。
+- **WebPaint 正解**（ground-truth）：`cloud-freshness.ts:96-110` 造一个 user-gesture probe，「检查云端…」对话框带「跳过到离线」按钮，点击 resolve probe → `Promise.race` 让 open 走 `{source:"local",reason:"skipped"}`。**无硬超时，用户即超时**。
+- **同源 0caf386 模式**：后台流绝不卡死/劫持导航，降级离线，只 user-gesture 触发交互。
+- **修法**：JRP busy 遮罩加「跳过到离线」动作 → 把它做成 probe 传进 `fresh.open(name, { probe, isOnline, localDirty, onNewer, adopt })`。注意 Model-B 下 busy 是 store 驱动，probe 的造法要适配（store 在 `ui.busy` 回调里暴露一个 skip signal，或 open 内置一个可由 ui 触发的逃生）。**设计点需想清楚再动**（Model-B vs WebPaint app-driven 的 probe 来源不同）。
+
+### 3.2 ⚠ 加密接线（WP→JRP）
+- **病**：JRP 加密架构在（seal.ts + crypto-container.ts，peek 真 crypto），但**未接线**：codec seam 没注入、getPassword 恒 null、ZipFile preview throw、saltFile ⚠TODO。
+- **WebPaint 正解**：3 层 ADR-0012（外层明文 zip + 内层 AES-256 .7z `-mhe` + 尾部 AES-GCM peek），PBKDF2-250k，7z-wasm vendored，format-blind + 非交互 getPassword。
+- **修法**：把 WebPaint 的 `configureCryptoCodec` 注入 + encrypt/decrypt/verifyPassword/peek 接线移植进 JRP 的模块结构；接 ZipFile setPreview/getPreview 管线；实现 `store.encryption`（库统一密钥 + saltFile）。**这是 store 红线区 + 体量大，改前 escalate。**
+
+### 3.3 providers/auth.ts getToken 修复（JRP→WP）
+- JRP 0caf386 已修（getToken silent 失败 throw 降级离线、绝不后台 acquireTokenRedirect）；WebPaint auth.ts:193-196 还是旧 bug。回传时把这条带过去。
+
+### 3.4 Model-B（store-driven）是否回传 = 待你拍板（最大风险）
+- JRP = store 在决策点回调 ui.busy/resolveConflict/askPassword；WebPaint = app 驱动（cloud-freshness.ts 自管，store 是非交互 mechanism lib）。
+- 把 WebPaint 整体搬到 Model-B = 重写它的 app↔store 接缝，风险最高。选项：①整体迁 Model-B；②WebPaint 保 app-driven，只回传深模块分解（offload/reconcile/collection-cache）+ 行为修复，不动编排范式。**默认建议 ②**（先收割低风险高价值的深模块下沉，编排范式留后），但这是你的决定。
+
+---
+
+## 4. 红线静态论证 checklist（§3 补完后，subagent 跑）
+
+> 用户要求：「store 设计应在**离线模式完美工作**，重连后**不导致恶意覆盖丢数据**」。逐条静态论证（不靠真机）。
+> 论证对象 = 补完退化后的 JRP store（也是回传基线）。
+
+**场景 A：离线模式完美工作**
+- [ ] 离线 open：fetchMeta 失败/挂死 → 走 local 读（skip-to-offline / isOnline guard），不卡、不报错吞掉。
+- [ ] 离线 save：本地落盘 + 标 dirty + push 失败降级（reportError，不丢）。
+- [ ] 离线 delete：local trash + 持久化删队列（base-etag != null 才入队）。
+- [ ] 离线 list/空 list：`complete:false` 绝不据此删本地缓存（reconcile no-op）。
+- [ ] 强杀/reload：collection IDB hydrate 续存；dirty 永不被驱逐。
+
+**场景 B：重连后不恶意覆盖 / 不丢数据**
+- [ ] 每次 push 带 If-Match = parentBase（不是 last-seen / 共享 etag / 时间）→ 陈旧设备推必 412。
+- [ ] 412 → tryHeal（byte-equal 自愈）→ 否则 surface conflict（resolveConflict），**绝不静默 LWW**。
+- [ ] 冲突 keepMine = weakOverride（云端 loser 进 `.backup`，不丢）；cancel = 不动，留 dirty。
+- [ ] clean → safePull 快进（跳 backup）；dirty → 必 surface（onNewer/resolveConflict）。
+- [ ] 删除/覆盖 = move-aside（`.trash`/`.backup`，同层不跨网）；脏字节绝不硬删。
+- [ ] 驱逐（offload）只 clean∧在线∧曾 synced∧云端完整(size>0)；dirty/local-only/cloud-gone → OffloadIllegalError。
+- [ ] adopt 前 validateAdopt（防 captive-portal HTML 覆盖唯一好副本）；etag 在 local.save 成功后才推进（R1）。
+- [ ] 身份 = path/name（无 GUID）；new-file 无 base → conflictBehavior:"fail" + size/tail 校验，撞名两份都留不冒认。
+- [ ] uat = user-action-time（非 save/sync/cache 时间）；boot/reconcile 期杂散滚动不盖新 uat。
+
+每条：指到 enforce 它的模块 + 行号，论证「能否产生左栏坏结果」。
+
+---
+
+## 5. 执行顺序（用户定）
+
+1. ✅ **对账表**（本 doc）。
+2. **补退化**：3.1 skip-to-offline（纯 JRP 内修）→ 3.2 加密接线（红线，改前 escalate）→ 3.3 auth 修复（已在 JRP，回传时带走）。
+3. **subagent 静态论证红线**（§4 checklist，离线完美 + 重连不覆盖）。
+4. **逐模块回传 WebPaint**：先 verify parity 的（cloud-sync/local-cache/folder-*/providers diff）；再 JRP→WP 下沉（offload/reconcile/collection-cache + getToken 修复）；Model-B（3.4）按你 §3.4 的决定。WebPaint 红线为准，逐模块走 `pwa-cloud-store` skill。
+
+> 已落地：README §8 速查表旧名 `pin()/evict()`→`keepOffline()/offload()`（worktree 分支 `jrp-store-finalize`/4b8c1a0，未 merge 回 main，等收口批次一起落）。
+</content>
+</invoke>
