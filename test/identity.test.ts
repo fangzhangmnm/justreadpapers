@@ -26,7 +26,7 @@ function rig() {
   const sub = createSubstrate();
   const { doPush } = createPush({ cloud, head, seal: sealPass, safeResolve, serialize: sub.serialize, editVersion: () => 0 });
   const id = createIdentity({ cloud, local, head, doPush, serialize: sub.serialize, serialize2: sub.serialize2 });
-  return { cloud, local, head, ...id };
+  return { provider, cloud, local, head, ...id };
 }
 
 test("rename local-only：新名先存、旧名后删（phantom-path）", async () => {
@@ -53,6 +53,39 @@ test("saveAs：写新身份，云端有", async () => {
   const r = await saveAs("copy.pdf", { encode: () => enc("COPY") });
   eq(r.where, "cloud", "推云端");
   eq(await asStr((await cloud.pull("copy.pdf"))?.blob), "COPY", "云端 copy");
+});
+
+test("rename dirty：推当前字节到新名 + 旧名进云端 .trash（脏字节不丢、不 hard-delete C5）", async () => {
+  const { cloud, local, head, rename } = rig();
+  await cloud.push("old.pdf", enc("ORIG"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");   // dirty + 本地新字节
+  const r = await rename("old.pdf", "new.pdf");
+  eq(r.where, "cloud-push+trash", "dirty → 推新名 + 旧名进 trash");
+  assert(!r.oldCloudOrphan, "旧名 trash 成功");
+  eq(await asStr((await cloud.pull("new.pdf"))?.blob), "EDITED", "新名=当前编辑字节（脏字节没丢）");
+  assert(!(await cloud.pull("old.pdf")), "旧名已移出主路径（进了 .trash，可恢复）");
+});
+
+test("rename dirty + 旧名 trash 失败 → oldCloudOrphan（surface 不吞，新名已推不回滚）", async () => {
+  const { provider, cloud, local, head, rename } = rig();
+  await cloud.push("old.pdf", enc("ORIG"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");
+  provider.injectFault({ op: "move", kind: "error", status: 500 });   // cloud.trash 的 move 失败
+  const r = await rename("old.pdf", "new.pdf");
+  assert(r.oldCloudOrphan, "旧名 trash 失败 → oldCloudOrphan=true（surface 让 caller 处理）");
+  eq(await asStr((await cloud.pull("new.pdf"))?.blob), "EDITED", "新名已推成功（不因旧名 trash 失败回滚）");
+});
+
+test("rename：encode 抛错 → 旧名本地不丢（phantom-path：先存新再删旧，没存成就没删）", async () => {
+  const { local, rename } = rig();
+  await local.save("old.pdf", enc("DATA"));
+  let threw = false;
+  try { await rename("old.pdf", "new.pdf", { encode: () => { throw new Error("boom"); } }); } catch { threw = true; }
+  assert(threw, "encode 抛 → rename 抛");
+  assert(await local.exists("old.pdf"), "旧名本地还在（落盘前失败，绝没先删）");
+  assert(!(await local.exists("new.pdf")), "新名没建");
 });
 
 test("acquire：云端 item → 本地 + adopt", async () => {
