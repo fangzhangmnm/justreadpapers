@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JRP gallery/folder 层架构深化 — 离线回归根因 · 太监身份 · 漂移机理</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e8eaed; --dim:#9aa3b2;
+    --line:#2a2f3a; --accent:#6ea8fe; --good:#4ade80; --warn:#fbbf24; --bad:#f87171;
+    --purple:#c4b5fd; --teal:#5eead4;
+    --strong:#22c55e; --worth:#3b82f6; --spec:#a855f7;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 24px 120px}
+  h1{font-size:30px;line-height:1.25;margin:0 0 6px;letter-spacing:-.3px}
+  h2{font-size:22px;margin:56px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:28px 0 8px}
+  .sub{color:var(--dim);font-size:14px;margin-bottom:4px}
+  code{font-family:var(--mono);font-size:.88em;background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--teal)}
+  pre{font-family:var(--mono);font-size:12.5px;background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;color:#cdd3de}
+  pre .c{color:#6b7280}
+  pre .k{color:#f0abfc} pre .s{color:#86efac} pre .n{color:#fcd34d}
+  a{color:var(--accent)}
+  .lead{font-size:16px;color:#d4d8df;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:16px 18px;margin:18px 0}
+  .tldr{background:linear-gradient(180deg,#1a2030,#161a22);border:1px solid #2c3650;border-radius:12px;padding:20px 22px;margin:22px 0}
+  .tldr b{color:#fff}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:780px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:0;margin:26px 0;overflow:hidden}
+  .card .hd{display:flex;align-items:center;gap:12px;padding:16px 20px;background:var(--panel2);border-bottom:1px solid var(--line)}
+  .card .hd .num{font-family:var(--mono);font-size:22px;color:var(--accent);font-weight:700}
+  .card .hd h3{margin:0;font-size:18px;flex:1}
+  .card .bd{padding:18px 20px}
+  .badge{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:4px 10px;border-radius:999px;white-space:nowrap}
+  .b-strong{background:rgba(34,197,94,.15);color:var(--strong);border:1px solid rgba(34,197,94,.4)}
+  .b-worth{background:rgba(59,130,246,.15);color:var(--worth);border:1px solid rgba(59,130,246,.4)}
+  .b-spec{background:rgba(168,85,247,.15);color:var(--spec);border:1px solid rgba(168,85,247,.4)}
+  .lbl{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:700;margin:16px 0 6px}
+  .files{font-family:var(--mono);font-size:12px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px}
+  .files span{background:#11141a;border:1px solid var(--line);border-radius:5px;padding:2px 7px}
+  ul{margin:6px 0;padding-left:20px} li{margin:4px 0}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  @media(max-width:780px){.ba{grid-template-columns:1fr}}
+  .ba .col{background:#0b0d12;border:1px solid var(--line);border-radius:10px;padding:14px}
+  .ba .col h4{margin:0 0 10px;font-size:13px;letter-spacing:.5px;text-transform:uppercase}
+  .ba .before h4{color:var(--bad)} .ba .after h4{color:var(--good)}
+  .callout{border-radius:8px;padding:12px 14px;margin:14px 0;font-size:14px}
+  .c-warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);color:#fde68a}
+  .c-good{background:rgba(74,222,128,.07);border:1px solid rgba(74,222,128,.3);color:#bbf7d0}
+  .c-bad{background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.3);color:#fecaca}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:600}
+  .tick{color:var(--good);font-weight:700} .cross{color:var(--bad);font-weight:700} .meh{color:var(--warn)}
+  .node{border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--mono);text-align:center;border:1px solid var(--line)}
+  .n-app{background:rgba(110,168,254,.12);border-color:rgba(110,168,254,.5);color:#bfdbfe}
+  .n-store{background:rgba(94,234,212,.1);border-color:rgba(94,234,212,.45);color:#99f6e4}
+  .n-cloud{background:rgba(196,181,253,.1);border-color:rgba(196,181,253,.45);color:#ddd6fe}
+  .n-local{background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.4);color:#fde68a}
+  .n-dead{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.4);color:#fecaca;opacity:.85}
+  .flow{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .arrow{text-align:center;color:var(--dim);font-size:14px}
+  .row{display:flex;gap:8px} .row>*{flex:1}
+  .q{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  .foot{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;background:#11141a;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--teal)}
+  .big-rec{background:linear-gradient(180deg,#11261a,#0f1714);border:1px solid rgba(34,197,94,.35);border-radius:14px;padding:22px 24px;margin:24px 0}
+  s{opacity:.75}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="sub">JustReadPapers · 架构深化报告 · improve-codebase-architecture · as-of 2026-06-29</div>
+  <h1>gallery / folder 层：离线回归的根因、太监身份、与 AI 漂移的机理</h1>
+  <div class="sub">用语遵循 <code>store/CONTEXT.md</code>（residency / kept-offline / local-head / reconcile / catalog / docId）+ 架构词汇（module / interface / depth / seam / shallow / deletion-test）。</div>
+
+  <div class="lead">
+    <b>一句话</b>：你问的"到底要不要一个 gallery/folder 深模块"——答案是 <b>不要一个，要三个家</b>。现在被揉在一起的三件事，根本属于三个不同的层：①<b>residency-aware 列举</b>（谁在本地/云/脏）= <b>store 的活</b>，现在漏给了 app；②<b>读者域文档身份</b>（内容哈希 docId / 阅读位置 / 太监）= <b>store 的兄弟库</b>，现在 inline 在 openPaper 最深处；③<b>folder-tree 的 UI 范式</b>（切层/面包屑/拖拽）= <b>共享 presentation 件</b>，这才是唯一真正的"gallery 模块"，而它是 UI、不是存储。离线不可用、太监、AI 漂移，全是这三者被混淆 + 一个<b>泄漏的 listing 接口</b>共同产物。
+  </div>
+
+  <div class="tldr">
+    <div class="lbl" style="margin-top:0">六问速答</div>
+    <table>
+      <tr><th style="width:30%">你的问题</th><th>结论</th></tr>
+      <tr><td><code>mergeLocalCloud</code> 在哪个模块？该不该存在？</td><td>在 <b>WebPaint <code>src/gallery-model.ts:15-25</code>（app 层纯函数）</b>。<b class="cross">不该存在</b>——它就是 <code>store/CONTEXT.md</code> §反-duplicate 点名要删的"什么在本地"越狱（leak-test grep 里 <code>reconcileCloudGone</code> 同类）。它存在，是因为 store 的 listing 接口把本地/云裂成两半，逼每个 app 自己拼。</td></tr>
+      <tr><td>store 把 local/cloud 架空成纯状态机了吗？file 接口有 local/cloud 属性吗？</td><td><b class="meh">架空了一半。</b> <b>读</b>（<code>open</code>=本地或云透明）和<b>去留</b>（<code>keepOffline/offload</code>，无 LRU/pin）抽象干净了。但 <b>listing 没有</b>：<code>CloudItem{path,size}</code> <b class="cross">没有 residency 字段</b>，<code>listAll()</code>=纯云端、<code>localKeys()</code>=纯本地，两个半截。file 对象没有 local/cloud 属性，residency 要另问 <code>isKeptOffline()</code>。</td></tr>
+      <tr><td><code>store.localKeys</code> 是什么？JRP 是不是误用 collection 存 PDF？</td><td><code>localKeys()</code> = <code>local.appKeys()</code> = IDB 里已缓存的应用文件名集合（当徽章用）。<b class="cross">没有误用 collection 存 PDF</b>：PDF 走 <code>store.file()</code>（IDB blob + 云），<code>collection</code> 只存 catalog（阅读位置/标题）。这个假设可排除。</td></tr>
+      <tr><td>"太监"的本质？hash 去重该不该是 store 的事？为什么泄漏进 app？</td><td>太监 = <b>内容哈希 docId 这个"第二身份"</b>（store 身份=path/name），裁决 inline 在 <code>openPaper</code>（app.ts:222-226）最深处、<b>全静默</b>、无 locality、孤儿 entry <b>无家</b>。hash 去重<b class="cross">不该进 store</b>（store 格式盲；可变内容编辑器每改一笔哈希就变——MASTER 已否决 GUID-in-content）。它该进<b>读者域兄弟库</b>。泄漏原因=它从来没有过模块，一直是 UI handler 里的局部副作用。</td></tr>
+      <tr><td>离线不可用的根因？</td><td><b>不是"缓存失效"</b>——<code>signOut</code> 只清 MSAL token，IDB 完好，<code>open()</code> 仍读本地。根因=<b>gallery 从不"列"本地</b>：<code>listGallery</code> 只 <code>store.listAll()</code>（云端），失败就 <code>catch→返空</code>，<code>localKeys</code> 只当徽章不进列表。三层 gating 叠加（详见候选①）。</td></tr>
+      <tr><td>需不需要一个 gallery/folder 深模块？</td><td><b>不需要"一个"。</b> 需要把三件事各归各家：residency 列举→store；文档身份→读者域库；folder-tree UI→共享 presentation 件。把三者合成一个 god "gallery 模块"正是错误的切法。</td></tr>
+    </table>
+  </div>
+
+  <h2>0 · 三方对照：离线列举能力的谱系</h2>
+  <p class="sub">关键发现：离线列举不只是"相对 WebPaint 回归"，<b>相对 JRP 自己的旧代码也回归了</b>。handoff P1 写的"JRP 一直云优先、是新增能力不是回归"——两头都错。</p>
+
+  <table>
+    <tr>
+      <th style="width:22%">能力</th>
+      <th>WebPaint（旧 store 库 / 当前线上）</th>
+      <th>JRP 旧代码（ARCHIVE，迁移前）</th>
+      <th>JRP 新代码（store 迁移后）</th>
+    </tr>
+    <tr>
+      <td><b>gallery 列举模型</b></td>
+      <td>本地 ∪ 云 <b>并集</b><br><span class="pill">mergeLocalCloud</span><br><code>gallery-model.ts:15-25</code></td>
+      <td>云为主 + <b>离线本地兜底</b>（二选一，非并集）<br><code>app.js:259-273</code></td>
+      <td>云端 only + catch→空<br><code>persistence/index.ts:117,133</code></td>
+    </tr>
+    <tr>
+      <td><b>登录态·离线浏览</b></td>
+      <td class="tick">✓ 显本地</td>
+      <td class="tick">✓ 列 IDB 缓存为 stub 行<br><span class="sub">"让飞机上也能看到本地有什么可以读"</span></td>
+      <td class="cross">✗ 返空</td>
+    </tr>
+    <tr>
+      <td><b>登出·浏览</b></td>
+      <td class="tick">✓ <code>mergeLocalCloud(local,[])</code></td>
+      <td class="cross">✗ 抽屉要求登录<br><code>app.js:299-303</code></td>
+      <td class="cross">✗ <code>app.ts:64</code> 硬清空</td>
+    </tr>
+    <tr>
+      <td><b>身份 / 去重</b></td>
+      <td>path/name（store）<br>+ 无内容哈希</td>
+      <td>OneDrive itemId（≈内容寻址）<br>无 SHA</td>
+      <td>内容哈希 docId（catalog）<br>+ store path/name <b>双 SSoT</b></td>
+    </tr>
+    <tr>
+      <td><b>signOut 动 IDB？</b></td>
+      <td class="tick">否（只清 token）</td>
+      <td>—</td>
+      <td class="tick">否（<code>auth.ts:177</code> 只 clearCache）</td>
+    </tr>
+  </table>
+
+  <div class="callout c-good">
+    <b>所以离线"飞机上要能看"这条家族教义</b>：WebPaint ✓、旧 JRP ✓（登录态离线）、<b>新 JRP ✗</b>。store 迁移时把列举的本地那半弄丢了。store 的 <b>字节</b>没事（<code>reconcile</code> 有权威闸不乱删、<code>open</code> 仍读本地）——丢的是<b>"列出本地"这个动作</b>。
+  </div>
+
+  <h2>候选清单</h2>
+
+  <div class="card">
+    <div class="hd">
+      <span class="num">①</span>
+      <h3>store 暴露<u>统一的 residency-aware 列举</u>——把虚拟文件系统真正架空</h3>
+      <span class="badge b-strong">Strong</span>
+    </div>
+    <div class="bd">
+      <div class="lbl">涉及文件</div>
+      <div class="files">
+        <span>store/types.ts (CloudItem/CloudSync)</span><span>store/cloud-sync.ts (listAll)</span>
+        <span>store/create-store.ts (list/listAll/localKeys)</span><span>store/reconcile.ts</span>
+        <span>store/local-cache.ts (appKeys)</span><span>persistence/content.ts</span>
+        <span>persistence/index.ts (listGallery)</span><span>WebPaint gallery-model.ts (mergeLocalCloud)</span>
+      </div>
+
+      <div class="lbl">问题（friction）</div>
+      <p>store 的卖点是"把文件系统架空成路径寻址的虚拟 FS，离线在线透明"。它对<b>读</b>和<b>去留</b>兑现了这个承诺，<b>唯独 listing 没有</b>：</p>
+      <ul>
+        <li><code>store.listAll()</code> → 纯云端（<code>cloud-sync.ts:308</code>）；<code>store.localKeys()</code> → 纯本地（<code>local-cache.ts:27</code>）。两个半截原语，<b>没有一个"列出这个虚拟 FS 里所有文件"的入口</b>。</li>
+        <li><code>CloudItem{path,size}</code> 没有 residency 字段——一个文件是"云端/已缓存/脏/local-only"哪种态，列举结果里看不出来。</li>
+        <li>于是每个消费方<b>必须自己 union</b>：WebPaint 写了 <code>mergeLocalCloud</code>，JRP 新代码<b>忘了 union</b>。</li>
+      </ul>
+      <div class="callout c-bad">
+        <b>这正是 store 自己禁止的事。</b> <code>store/CONTEXT.md</code> §反-duplicate（47-57 行）白纸黑字：「<i>本地副本的存在与去留 = store 独占职责……app 层出现任何回答"什么在本地"的逻辑 = duplicate，必删</i>」，leak-test grep 还点名 <code>reconcileCloudGone</code>。<b><code>mergeLocalCloud</code> 就是这条红线点名的越狱</b>——它只是因为换了名字躲过了 grep。<b>教义用文档禁止，接口却用形状邀请。这就是矛盾，也是漂移的结构性温床。</b>
+      </div>
+
+      <div class="lbl">deletion test</div>
+      <p>删掉 <code>mergeLocalCloud</code>（和"列本地"那半逻辑）→ 复杂度不会消失，而是<b>在每个消费 app 里重新长出来</b>（WebPaint 长了一次、JRP 该长没长 = bug）。结论：它在挣钱（earning its keep）→ 它该<b>只活一次</b>，活在真相所在地 = store（store 已独占 cloud-sync 的 etag、local-cache 的本地、local-head 的 dirty 三样输入）。</p>
+
+      <div class="lbl">方案（solution）</div>
+      <p>把列举接口加深成<b>单一 residency-aware 列举</b>：</p>
+      <pre><span class="c">// store 新面：一次列出整个虚拟 FS，每项自带 residency</span>
+<span class="k">type</span> Residency = <span class="s">"cloud-only"</span> | <span class="s">"cached"</span> | <span class="s">"dirty"</span> | <span class="s">"local-only"</span>;
+<span class="k">interface</span> Entry { path: <span class="k">string</span>; size?: <span class="k">number</span>; residency: Residency; }
+store.<span class="n">listEntries</span>(): Promise&lt;{ files: Entry[]; folders: <span class="k">string</span>[]; complete: <span class="k">boolean</span> }&gt;;
+<span class="c">// 内部：union(cloud.listAll, local.appKeys) ⋈ local-head(dirty/seenBase)</span>
+<span class="c">// 云端那半拿不到（登出/离线/抛错）→ 仍从本地 appKeys 产出 local-only / cached 行</span></pre>
+      <ul>
+        <li><code>localKeys()</code> 降级为<b>内部细节</b>（或保留给批量判，但不再是列举的唯一本地来源）。</li>
+        <li><code>mergeLocalCloud</code> <b>删除</b>；WebPaint 回传时一并删（消一处越狱）。</li>
+        <li>offline-first 变成<b>接口的性质</b>，而非 app 的纪律——没有任何消费方能"忘记列本地"。</li>
+      </ul>
+
+      <div class="lbl">收益（locality + leverage）</div>
+      <ul>
+        <li><b>locality</b>：union 住在真相所在地。app 永远拿不到 etag/dirty/online——本就喂不到 union 的输入，现在连这个动作都不归它。</li>
+        <li><b>leverage</b>：消费方一行 <code>listEntries()</code> 拿到离线可用的完整列表；<b>"云端 only 列举"这种错误状态变得不可表达</b>（呼应 store 自己用 <code>local-head.recordEdit</code> 把 bypass 做成不可表达的成功范式）。</li>
+        <li><b>test surface</b>：union 像 <code>classifyCloudGone</code> 一样成为 store 内的纯函数单测点，而非散在 app 的 <code>try/catch→返空</code> 里（现在那个 catch 把所有失败都吞成空 gallery，测都没法测）。</li>
+      </ul>
+
+      <div class="ba">
+        <div class="col before">
+          <h4>Before — 两个半截 + app 自拼（会忘）</h4>
+          <div class="flow">
+            <div class="node n-app">app: listGallery</div>
+            <div class="arrow">↓ 必须自己 union（JRP 忘了）</div>
+            <div class="row">
+              <div class="node n-store">listAll() · 云端</div>
+              <div class="node n-store">localKeys() · 本地</div>
+            </div>
+            <div class="arrow">↑ 两条独立轨道</div>
+            <div class="row">
+              <div class="node n-cloud">cloud-sync</div>
+              <div class="node n-local">local-cache</div>
+            </div>
+            <div class="node n-dead">residency? 不在列举里 → 另问 isKeptOffline</div>
+          </div>
+        </div>
+        <div class="col after">
+          <h4>After — 一个深列举原语</h4>
+          <div class="flow">
+            <div class="node n-app">app: listEntries()</div>
+            <div class="arrow">↓ 一行，离线自动可用</div>
+            <div class="node n-store" style="padding:14px">store.listEntries<br><span style="font-size:11px;color:var(--dim)">union + residency 在库内</span></div>
+            <div class="arrow">↓ 库内合并</div>
+            <div class="row">
+              <div class="node n-cloud">cloud-sync</div>
+              <div class="node n-local">local-cache</div>
+              <div class="node n-local">local-head</div>
+            </div>
+            <div class="node n-dead"><s>mergeLocalCloud（删）</s></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout c-warn">
+        <b>触红线区，必走 <code>pwa-cloud-store</code> skill + escalate。</b> 改的是 store 列举接口（CloudSync/CloudItem 形状）。但这<b>不发明红线</b>——它把已写在 CONTEXT.md 的"app 不得碰什么在本地"从文档承诺变成接口强制。回传 WebPaint 时顺手删 <code>mergeLocalCloud</code> 越狱。
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd">
+      <span class="num">②</span>
+      <h3>读者域库收编"太监"——<code>library.open(path) → {blob, docId, position, 身份事件}</code></h3>
+      <span class="badge b-worth">Worth exploring</span>
+    </div>
+    <div class="bd">
+      <div class="lbl">涉及文件</div>
+      <div class="files">
+        <span>domain/doc-id.ts</span><span>persistence/catalog.ts</span>
+        <span>ui/app.ts: openPaper 222-232 / onGalMove 84 / onGalRename 117 / jumpscare 240</span>
+        <span>persistence/index.ts:129 (join)</span>
+      </div>
+
+      <div class="lbl">问题：太监的本质</div>
+      <p>"太监"= <b>一个本该被听见、却生在最深处局部副作用里的身份事件</b>。具体链条（实证）：</p>
+      <ul>
+        <li><code>doc-id.ts</code>：<code>contentDocId</code> = 整块 PDF 字节 SHA-256 → <code>c-&lt;16hex&gt;</code>，当 catalog item 的 <b>key</b>。</li>
+        <li><code>catalog.ts</code>：catalog <b>完全 key by docId</b>，<code>fileName</code> 只是可变 payload → 这是<b>第二身份</b>（store 身份=path/name）。</li>
+        <li><code>openPaper</code>（app.ts:222-226）每次开都<b>只从字节</b>算 docId，分支<b>全静默</b>：
+          <pre><span class="k">const</span> docId = <span class="k">await</span> contentDocId(<span class="k">await</span> blob.arrayBuffer());   <span class="c">// 只认字节</span>
+<span class="k">if</span> (!cat.get(docId)) cat.upsert(docId, {fileName: item.name, ...}); <span class="c">// (b) 新生</span>
+<span class="k">else</span>              cat.upsert(docId, {fileName: item.name});          <span class="c">// (a)(c) 静默改绑</span></pre>
+        </li>
+      </ul>
+      <table>
+        <tr><th>case</th><th>发生什么</th><th>太监在哪</th></tr>
+        <tr><td><b>(a) 同内容两路径</b></td><td>同 docId → <code>fileName</code> 被静默改成"最后打开的那个" → 两份文件抢一个阅读位置</td><td>没人知道两个文件撞成一个身份</td></tr>
+        <tr><td><b>(b) 内容变（损坏/截断）</b></td><td>新 docId → 新 entry；<b>老 docId entry 永不回收</b>，成幽灵行，老位置永远够不到</td><td class="cross">字面狸猫换太子；孤儿 entry <b>无任何代码会清</b></td></tr>
+        <tr><td><b>(c) 外部移动/改名</b></td><td>下次开 → 同哈希 → <code>fileName</code> 静默 re-bind 到新路径</td><td>是身份事件，但没人听见</td></tr>
+      </table>
+      <div class="callout c-bad">
+        身份逻辑<b>摊在 app.ts 各 handler inline</b>（openPaper / onGalMove / onGalRename / onGalTrash / jumpscare），<b>没有一个"解析这个文件的身份"模块</b>。case (b) 的孤儿<b>根本没有家</b>。这违反 store 自己的 Model-B「决策必 surface」——只不过违反者是 app，不是 store。
+      </div>
+
+      <div class="lbl">hash 去重该不该是 store 的事？（你的直觉 vs 红线）</div>
+      <p>直觉合理，但<b>对通用 store 不成立</b>：store 格式盲（MASTER §A：identity=path/name，GUID-in-content 真机后 rollback），而<b>编辑器的内容可变——每改一笔哈希就变</b>，WebPaint 这种 app 用不了内容哈希身份。所以 hash 去重<b>不进 cloud-store</b>。但对<b>只读不可变内容</b>（论文/书/音频）它是合法身份——因此它该住在 <b>store 的兄弟库（读者域）</b>，给 JRP/JustReadBooks/音频位置复用。<b>这正是它泄漏进 app 的原因：它需要一个家，而家一直没建，于是落在了最近的地面=openPaper。</b></p>
+
+      <div class="lbl">方案</div>
+      <p>先做 <b>docs/13 的先决决策</b>（A 砍 / B 留），再动代码：</p>
+      <ul>
+        <li><b>选项 A（更简）</b>：砍内容哈希，catalog 改 key by 路径 → 单 SSoT、零静默裁决。代价：外部 OneDrive 移动后位置重置（= wart E 接受到位置上）。</li>
+        <li><b>选项 B（更强）</b>：建读者域模块 <code>library</code>，<code>open(path)</code> 返 <code>{blob, docId, position, event}</code>，<code>event ∈ {born, recognized, moved, content-changed-orphan}</code>；openPaper 退回纯 UI；孤儿回收有家；裁决按 Model-B surface。</li>
+      </ul>
+
+      <div class="ba">
+        <div class="col before">
+          <h4>Before — 身份散在 UI handler</h4>
+          <div class="flow">
+            <div class="node n-app">openPaper（最深处）</div>
+            <div class="node n-app">onGalMove / onGalRename</div>
+            <div class="node n-app">jumpscare</div>
+            <div class="arrow">↓ 各自 inline 算/改 docId</div>
+            <div class="node n-dead">contentDocId + catalog 桥<br>（无模块 · 静默 · 孤儿无家）</div>
+          </div>
+        </div>
+        <div class="col after">
+          <h4>After — 读者域库一等身份</h4>
+          <div class="flow">
+            <div class="node n-app">openPaper（纯 UI 渲染）</div>
+            <div class="arrow">↓ library.open(path)</div>
+            <div class="node n-store" style="padding:14px">reader-domain library<br><span style="font-size:11px;color:var(--dim)">{blob, docId, position, event}</span></div>
+            <div class="arrow">↓ 复用</div>
+            <div class="row"><div class="node n-cloud">JRP</div><div class="node n-cloud">JustReadBooks</div><div class="node n-cloud">音频位置</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="callout c-warn">这是 docs/13 已建模的活，与候选③同批（folder UI 抽象那轮）。<b>不进 store</b>。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd">
+      <span class="num">③</span>
+      <h3>folder-tree 作为<u>共享 presentation 件</u>——唯一真正的"gallery 模块"，且它是 UI</h3>
+      <span class="badge b-spec">Speculative</span>
+    </div>
+    <div class="bd">
+      <div class="lbl">涉及文件</div>
+      <div class="files">
+        <span>gallery-model.ts (sliceFolder/breadcrumb/path 代数)</span><span>ui/gallery.ts</span>
+        <span>WebPaint gallery-path/gallery-model</span><span>siblings: webxiaoheiwu / RealHome</span>
+      </div>
+      <div class="lbl">问题</div>
+      <p>folder-tree 的纯路径代数（<code>sliceFolder</code>/<code>breadcrumb</code>）+ 拖拽/改名/移动 UI，在每个 sibling 里重写。它是<b>纯 presentation</b>，却和"列举""身份"挤在同几个文件里，让人误以为要一个混合的"gallery 深模块"。</p>
+      <div class="lbl">方案</div>
+      <p>抽一个共享 UI 件：<b>输入</b> = 候选①的 residency-aware 列举 + 候选②的身份事件；<b>职责</b> = 渲染 folder 树/切层/面包屑/拖拽。<b>零 store 知识、零 identity 知识</b>。这就是 handoff P3。</p>
+      <div class="callout c-good">
+        <b>关键判断</b>：这是三件事里<b>唯一</b>名副其实的"gallery/folder 模块"，而它<b>是 UI、不是存储</b>。<code>gallery-model.ts</code> 现在的 <code>sliceFolder</code>/<code>breadcrumb</code> 已经是干净的纯函数（零 DOM/网络/store），放对了地方——它需要的是<b>跨 sibling 复用</b>，而不是更多职责。<br><b>错误的切法</b> = 把 residency + identity + UI 揉进一个 god "gallery 深模块"。三个家，不是一个。</div>
+
+      <div class="ba">
+        <div class="col before">
+          <h4>Before — 一个想象中的 god 模块</h4>
+          <div class="flow">
+            <div class="node n-dead" style="padding:16px">gallery/folder「深模块」<br>列举 + residency + 身份 + UI<br>（混层 · 每 sibling 重造）</div>
+          </div>
+        </div>
+        <div class="col after">
+          <h4>After — 三个家各司其职</h4>
+          <div class="flow">
+            <div class="node n-store">① store: residency 列举</div>
+            <div class="arrow">↓</div>
+            <div class="node n-cloud">② 读者域库: 身份事件</div>
+            <div class="arrow">↓</div>
+            <div class="node n-app">③ folder-tree UI（纯 presentation · 跨 sibling）</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>为什么 AI 会漂移（这才是你真正在问的）</h2>
+  <p class="sub">离线 bug、太监、mergeLocalCloud 越狱——表面是三个独立故障，根子是<b>同一个机理</b>。</p>
+
+  <div class="grid2">
+    <div class="card" style="margin:8px 0"><div class="bd">
+      <h3 style="margin-top:0">1 · 浅/泄漏的接口逼"重新推导"，重新推导就是漂移的入口</h3>
+      <p><code>listAll</code>+<code>localKeys</code> 两个半截，逼每个 app 重推 union。<b>重推一次，就可能漏一个分支</b>——JRP 漏了本地。而 <code>open()</code> 那种深接口（一行拿到本地或云）<b>没人能漏</b>。<b>深接口让错误不可表达；浅接口把正确性外包给纪律，纪律必腐。</b></p>
+    </div></div>
+    <div class="card" style="margin:8px 0"><div class="bd">
+      <h3 style="margin-top:0">2 · 文档强制的不变量必漂；类型强制的不变量不漂</h3>
+      <p>CONTEXT.md 禁止 app 碰"什么在本地"——但接口形状<b>要求</b>它碰。编译器抓不到这个矛盾。<code>mergeLocalCloud</code> 还骗过了 leak-test grep（换了名字）。<b>tripwire（grep）不是结构屏障。</b> 把不变量<b>挪进类型/接口</b>（候选①）才治本——这正是 store 用 <code>recordEdit</code> 把 bypass 做成"不可表示"的同一招。</p>
+    </div></div>
+    <div class="card" style="margin:8px 0"><div class="bd">
+      <h3 style="margin-top:0">3 · 移植 = 从浅接口重推导</h3>
+      <p>JRP 是从 WebPaint <b>port</b> 过来的。port 不是复制行为，是<b>对着浅接口重新实现</b>。WebPaint 的 offline-first 住在 app 层的 <code>mergeLocalCloud</code> 里——port 时只搬了 store、没搬那段 app 越狱逻辑，<b>编译器对"云端 only 列举"很满意</b>。能力就这么蒸发了。</p>
+    </div></div>
+    <div class="card" style="margin:8px 0"><div class="bd">
+      <h3 style="margin-top:0">4 · doc 是没有失效机制的缓存，会在代码漂移之上再漂一层</h3>
+      <p>handoff P1 把这个回归<b>误标成"不是回归、是新增能力"</b>——代码漂移之上叠了一层文档漂移，差点让下一个 agent 当 feature 去做。信任顺序（CLAUDE.md）：<b>代码现状 &gt; 人类原话 &gt; ADR &gt; AI 写的 how-doc</b>。本报告的对照表就是用代码现状纠了那条 doc。</p>
+    </div></div>
+  </div>
+
+  <div class="callout c-good" style="margin-top:18px">
+    <b>统一教训</b>：太监（身份没有家→落在 openPaper）和离线 bug（residency 没有家→app 漏拼）是<b>同一个病</b>——<b>一个职责没有结构性的家，就会落在最近的地面，并在每次重推导时悄悄变形</b>。治法不是更多文档/grep/审查，而是<b>给它一个深模块的家，让错误的形状无法编译</b>。store 早就证明过这招有效（local-head 的 bypass-不可表示）；候选①②就是把同一招用到 listing 和 identity 上。
+  </div>
+
+  <h2>Top recommendation — 先动哪个</h2>
+  <div class="big-rec">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <span class="badge b-strong">先做</span>
+      <b style="font-size:18px">候选① — store 统一 residency-aware 列举</b>
+    </div>
+    <p>它是<b>离线回归的结构性根因</b>，同时一举溶解 <code>mergeLocalCloud</code> 这一<b>整类越狱</b>（WebPaint 回传时一并删）。改完后，"忘记列本地"在每个 sibling 里都<b>不可表达</b>——这比修 JRP 一个 app 的三层 gating 收益大一个数量级，因为它治的是会在每次 port 复发的病根。</p>
+    <p style="margin-bottom:0"><b>路径</b>：触 store 列举接口 = 红线区 → 走 <code>pwa-cloud-store</code> skill + escalate（改前确认 <code>DATA SAFETY GUIDELINE.md</code>）。不发明红线，只把 CONTEXT.md 的承诺从文档变接口。</p>
+  </div>
+  <p><b>之后</b>：②（读者域库收太监，先定 docs/13 的 A/B）与 ③（folder-tree 共享 UI）同批做（handoff P2+P3）。<b>顺序的理由</b>：③ 的输入正是 ① 的列举 + ② 的身份事件，所以 ①→②→③ 是自然的依赖序。</p>
+  <p><b>临时止血</b>（若想先让用户能离线看、再做深化）：在 <code>persistence/index.ts:listGallery</code> 把 <code>store.localKeys()</code> 并进 <code>files</code>（catch 云端失败时保留本地行）+ 删 <code>app.ts:64</code> 的 <code>!signedIn</code> 硬清空 + 改 <code>gallery.ts:223</code> 空态文案。<b>但这是 app 层补丁，会再造一处 <code>mergeLocalCloud</code> 同类越狱</b>——只当过渡，终态以候选①为准。</p>
+
+  <div class="foot">
+    报告生成：improve-codebase-architecture · 2026-06-29 · 全自包含（无 CDN/外部依赖，符合家族 anti-abandonware 教义）。<br>
+    实证来源：store/CONTEXT.md §反-duplicate · docs/13-identity-model · WebPaint gallery-model.ts:15-25 / app-store.ts:155-175 · JRP ARCHIVE/app.js:254-284 · src/persistence/index.ts:115-136 · src/ui/app.ts:64,222-232 · src/store/{types,cloud-sync,local-cache,reconcile,create-store}.ts。<br>
+    下一步：请选要进入 grilling 的候选（建议 ①）。
+  </div>
+
+</div>
+</body>
+</html>
