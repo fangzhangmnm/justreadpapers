@@ -70,6 +70,12 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
   };
   const store = createStore({ provider, ui });   // local=idb、kv=localStorage 库内默认装配
 
+  // 重连重放离线删队列（base-etag 守卫：被别处改过/同名新文件 → edit-wins 不删，绝不盲删别设备新文件）。
+  //   单 app 单例，监听不卸；listGallery 也会 drain 一次（覆盖「离线删→重连后开图库」路径）。
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", () => { void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e)); });
+  }
+
   const catalog = createCatalog({ collection: store.collection<CatalogPayload>(cfg.CATALOG_NAME, { manual: true }) });
   const content = createContent(store);
   const settings = createSettings(store.localSettings);
@@ -105,6 +111,8 @@ export function createPersistence(hooks: PersistenceHooks = {}): Persistence {
       try {
         // cloud-gone 收敛（安全子集 #43）：clean 孤儿→local-only（不删不 trash）。失败/离线/partial 自 no-op。
         await store.reconcile().catch((e) => console.warn("[jrp] reconcile", e));
+        void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e));   // 重放离线删（开图库/刷新时机，覆盖重连）
+
         const tree = await content.listTree();
         const files = tree.files
           .filter((f) => f.path.startsWith(prefix) && /\.pdf$/i.test(f.path))

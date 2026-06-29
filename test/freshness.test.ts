@@ -32,6 +32,27 @@ test("open in-sync：seenBase == 云端 etag → 不动", async () => {
   eq(r.reason, "in-sync", "in-sync");
 });
 
+test("open in-sync 重捕 _base：reload 后 dirty(内存 _base/_parent 空)→ markSeen 闭合误报 collision 窗口（backlog）", async () => {
+  const provider = createMockProvider();
+  const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n: string) => n });
+  await cloud.push("f", enc("V1"));
+  const etag = cloud.getETag("f");
+  // 模拟 reload：新建 head 但 kv 预置 dirty=1（durable 跨 reload），内存 _base/_parent 全空（从没 recordEdit/markSeen）。
+  const headKv = memKv();
+  headKv.set("head.dirty:f", "1");
+  const head = createLocalHead({ kv: headKv, getCloudEtag: (n: string) => cloud.getETag(n) });
+  const local = createMockLocal();
+  await local.save("f", enc("MINE"));
+  const safeResolve = createSafeResolve({ cloud, local, head });
+  const { open } = createFreshness({ cloud, head, safeResolve });
+  assert(head.isDirty("f"), "reload 后仍 dirty(kv durable)");
+  // 修前：open in-sync 不 markSeen → _base/_parent 空 → ifMatchFor 走 no-base(null) → 推送 fail → 误报 collision。
+  // 修后：open in-sync(云端 etag===seenBase 回退值)→ markSeen 重捕 _base + _parent。
+  const r = await open("f");
+  eq(r.reason, "in-sync", "云端没动 → in-sync");
+  eq(head.ifMatchFor("f"), etag, "markSeen 后 push 的 If-Match = 当前云版 etag(不再 no-base 误报 collision)");
+});
+
 test("open clean → 静默快进（fast-forwarded，本地变云端版）", async () => {
   const { cloud, local, head, open } = rig();
   await cloud.push("f", enc("CLOUD"));

@@ -125,7 +125,7 @@ export function createStore(config: StoreConfig) {
       return Promise.resolve().then(() => fn(...a)).finally(() => { _userWriteInFlight = null; });
     };
   }
-  const delSF = singleFlight("删除", (n: string) => del.del(n));
+  const delSF = singleFlight("删除", (n: string) => del.del(n, { isOnline }));   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
   const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
 
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（默认 cancel=留 dirty）──

@@ -14,7 +14,7 @@ type AdoptFn = (plain: Blob, name: string) => unknown | Promise<unknown>;
 
 export interface FreshnessCfg {
   cloud: Pick<CloudSync, "fetchMeta">;
-  head: Pick<LocalHead, "seenBase" | "isDirty">;
+  head: Pick<LocalHead, "seenBase" | "isDirty" | "markSeen">;
   safeResolve: Pick<SafeResolve, "safePull">;
   busy?: Busy;
 }
@@ -57,7 +57,14 @@ export function createFreshness(cfg: FreshnessCfg) {
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
       const base = head.seenBase(name);
-      if (!base || meta.etag === base) return { source: "local", reason: "in-sync" };
+      if (!base || meta.etag === base) {
+        // 云端 === 本 tab 已见 base（没动）→ in-sync。reload 后内存 _base 空（seenBase 回退共享 etag），
+        //   此时 markSeen 重捕 _base（dirty 还顺带重捕 _parent，local-head.ts:82）→ 闭合「dirty 但 _base 空 →
+        //   下次推走 no-base fail → 误报 CloudNameCollisionError」窗口。只在 meta.etag===base（云端没动）调=安全：
+        //   云端动过会落到下面 dirty→surface 路径，绝不在这里前推 parent（防 B1 silent-overwrite）。
+        if (base != null) head.markSeen(name, meta.etag);
+        return { source: "local", reason: "in-sync" };
+      }
       const dirty = head.isDirty(name) || (localDirty ? localDirty() : false);
       if (!dirty) {                                       // clean → 静默快进（无 sheet；safePull 因 clean 跳备份）
         const r = await safeResolve.safePull(name, { adopt });
