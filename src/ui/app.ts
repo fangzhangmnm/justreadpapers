@@ -5,7 +5,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, passwordUi, answerPassword } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, passwordUi, answerPassword, cloudCheckUi, skipToOffline } from "../app-state.ts";
 import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -303,7 +303,7 @@ export const App = defineComponent({
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup, dragActive,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, onGalFolderChange, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
-      conflictUi, answerConflict, passwordUi, answerPassword,
+      conflictUi, answerConflict, passwordUi, answerPassword, cloudCheckUi, skipToOffline,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -406,7 +406,7 @@ export const App = defineComponent({
           <button class="jrp-btn jrp-btn-dark" @click="answerPassword(passwordUi.input || null)">确定</button>
         </div>
       </div>
-      <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div></div>
+      <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div><button class="jrp-btn jrp-busy-skip" v-if="cloudCheckUi.skippable" @click="skipToOffline">跳过到离线</button></div>
       <div class="jrp-toast jrp-update" v-if="appUi.updateAvailable" @click="forceUpdate">有新版本 · 点此刷新</div>
       <div class="jrp-toast" v-if="appUi.toast">{{ appUi.toast }}</div>
       <div class="jrp-drop-overlay" v-if="dragActive">

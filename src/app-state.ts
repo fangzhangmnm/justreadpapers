@@ -46,6 +46,20 @@ export function answerPassword(pw: string | null): void {
   passwordUi.open = false; passwordUi.input = ""; const r = _pwResolve; _pwResolve = null; if (r) r(pw);
 }
 
+// ── 云检查「跳过到离线」逃生闸（store 在 open 的 freshness 检查时驱动；红线：离线/挂死绝不卡 open）──
+// fetchMeta 挂死（iOS 登录态老 token acquireTokenSilent iframe）时，用户点「跳过到离线」→ 立即读本地。
+// 对齐 WebPaint cloud-freshness「跳过到离线」：无硬超时，用户即超时。skippable 真 = busy 遮罩上显示跳过按钮。
+export const cloudCheckUi = reactive({ skippable: false });
+let _skipResolve: (() => void) | null = null;
+function offlineEscapeUi(): { probe: Promise<unknown>; settle: () => void } {
+  cloudCheckUi.skippable = true;
+  const probe = new Promise<void>((res) => { _skipResolve = res; });
+  return { probe, settle: () => { cloudCheckUi.skippable = false; _skipResolve = null; } };
+}
+export function skipToOffline(): void {
+  const r = _skipResolve; _skipResolve = null; cloudCheckUi.skippable = false; if (r) r();
+}
+
 let _toastTimer: ReturnType<typeof setTimeout> | null = null;
 /** 全局 toast（persistence 错误 surface + app 自身消息共用一个 UI）。 */
 export function pushToast(msg: string): void {
@@ -64,7 +78,7 @@ function setSaveState(s: "dirty" | "saving" | "saved"): void {
 let _p: Persistence | null = null;
 /** 懒装配 persistence(首次用时建;createOneDriveProvider 只配置不连网,安全)。错误/保存态注入回 appUi。 */
 export function persistence(): Persistence {
-  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, askPassword: askPasswordUi });
+  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, askPassword: askPasswordUi, offlineEscape: offlineEscapeUi });
   return _p;
 }
 /** 设备本地设置面(zoom factor / spread / theme)。app 调这个,不碰 localStorage。 */

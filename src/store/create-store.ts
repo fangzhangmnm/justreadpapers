@@ -28,6 +28,11 @@ export interface StoreUI {
   askPassword?: (ctx: { name: string; reason: "open" | "save" | "unlock" }) => Promise<string | null>;
   resolveConflict?: (ctx: { name: string; local: Blob | null; cloud: Blob | null }) => Promise<ResolveChoice>;
   reportError?: (err: unknown) => void;
+  // 可选：云端检查（freshness gate）的「跳过到离线」逃生闸（对齐 WebPaint：无硬超时，用户即超时）。
+  // store 在 open 的 freshness 检查前调，拿 probe 与 fetchMeta race；用户点「跳过到离线」→ probe resolve → 读本地
+  //   （iOS 登录态老 token acquireTokenSilent iframe 永不 resolve→fetchMeta 挂死时的唯一逃生）。
+  // 不实现 → 无逃生闸（退回纯 isOnline 守卫 + 裸 await）。settle() 在检查结束后清理 skip UI。
+  offlineEscape?: () => { probe: Promise<unknown>; settle: () => void };
 }
 
 export interface StoreConfig {
@@ -149,7 +154,12 @@ export function createStore(config: StoreConfig) {
       },
       async open() {
         if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
-          await fresh.open(name).catch((e) => ui.reportError?.(e)); //   不立即返缓存——否则后台发现云端变了再采纳=闪一下（用户纠正）。代价=一次轻量 fetchMeta。
+          // isOnline：离线直接读本地、不碰 fetchMeta（离线模式完美工作，绝不卡 open）。
+          // offlineEscape：在线但 fetchMeta 挂死（iOS 老 token iframe）时，用户点「跳过到离线」→ probe 赢 race → 读本地。
+          //   对齐 WebPaint cloud-freshness「跳过到离线」（无硬超时，用户即超时）。不立即返缓存=防云端变了再采纳的闪。
+          const esc = isOnline() ? ui.offlineEscape?.() : undefined;
+          try { await fresh.open(name, { isOnline, probe: esc?.probe }).catch((e) => ui.reportError?.(e)); }
+          finally { esc?.settle(); }
           return readLocal();
         }
         if (keepOnOpen) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
