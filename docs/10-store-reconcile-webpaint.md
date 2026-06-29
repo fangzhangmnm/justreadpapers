@@ -112,9 +112,9 @@ JRP 在**结构**上领先（深模块分解 + store-driven Model-B + offload/re
 **已修红线**：
 - ✅ **C2 offload TOCTOU（a97da5b）**：check-then-act 跨 fetchMeta + offload 不在 serialize → 并发 save 写的 dirty 字节被 hardDelete + 清 dirty 标志 = 最毒红线（驱逐吃未推字节）。修=offload 进同名 serialize 链（⟂ save 的 local 写）+ fetchMeta 后 re-check isDirty（抄 `freshness.ts:87`）+ save 的 local.save 也进 serialize。1 回归测。
 
-**backlog（审计副产，非数据安全红线）**：
-- **del 的 isOnline 未接**（`create-store.ts` delSF 调 `del.del(n)` 无 opts → `del` 内 isOnline 默认 true）→ 离线删队列 + base-etag 守卫是**死代码**，离线删不传播（重连云文件还在 → 重新出现）。安全（本地 move-aside、无丢数据），但功能缺。修=把 store 的 `isOnline` 接进 delSF。
-- **markSeen 没接进 open/refresh**（reload 一个 cached 文件后再编辑 → push 拿 If-Match=null → no-base "fail" → 可能误报 `CloudNameCollisionError`）。errs-safe（偏向不覆盖），但 UX wart。回传时对 WebPaint 接法（CONTEXT.md 称 open 应 markSeen）。
+**backlog（审计副产，非数据安全红线）—— 已清（4a2a984）**：
+- ✅ **del 的 isOnline 未接**：delSF 接 `isOnline`（离线走删队列）+ persistence online 监听 & listGallery 各 drain 一次（之前 drainDeleteQueue app 根本没调 → 双修）。
+- ✅ **markSeen 没接进 open**：freshness.open 的 in-sync 路径（meta.etag===base 安全态）调 markSeen 重捕 _base/_parent，闭合 reload-后误报 collision 窗口；只在云端没动时调（防 B1 silent-overwrite）。回传时 WebPaint 用 app-driven `adoptBase` 等价物，对齐即可。
 
 ---
 
