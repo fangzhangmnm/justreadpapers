@@ -17,6 +17,7 @@ import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
 import { createCollection, type Collection } from "./collection.ts";
+import { createListing, type ListContext } from "./listing.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
@@ -104,6 +105,26 @@ export function createStore(config: StoreConfig) {
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
+
+  // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
+  //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
+  const FOLDERS_PENDING_KEY = "folders.pending";
+  const readPending = (): string[] => { try { const v = JSON.parse(kv.get(FOLDERS_PENDING_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const writePending = (a: string[]): void => kv.set(FOLDERS_PENDING_KEY, JSON.stringify([...new Set(a)]));
+  const addPendingFolder = (p: string): void => writePending([...readPending(), p]);
+  const clearPendingFolder = (p: string): void => writePending(readPending().filter((x) => x !== p));
+  // ensureFolder：本地先登记（离线可见/持久），在线则补建云端并清 pending；离线/失败留 pending 等 drainFolders。
+  async function ensureFolderLocalFirst(path: string): Promise<void> {
+    addPendingFolder(path);
+    if (isOnline()) { try { await cloud.ensureFolder(path); clearPendingFolder(path); } catch { /* 留 pending，回线补建 */ } }
+  }
+  async function drainFolders(): Promise<void> {
+    if (!isOnline()) return;
+    for (const p of readPending()) { try { await cloud.ensureFolder(p); clearPendingFolder(p); } catch { /* 下次再补 */ } }
+  }
+
+  // ── 统一列举（README §2）：整个虚拟 FS 一次列举 = local ∪ cloud，每项带 syncState。mergeLocalCloud 收进库内。──
+  const listing = createListing({ cloud, local, head, pendingFolders: readPending });
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
@@ -306,12 +327,26 @@ export function createStore(config: StoreConfig) {
     collection,
     localSettings,
     syncedSettings,
-    list: () => cloud.list(),
-    listAll: () => cloud.listAll(),
-    // 文件夹操作（gallery folder-tree）：空文件夹增删走深模块（删除"必须空"在 cloud 内强制）。
-    ensureFolder: (path: string) => cloud.ensureFolder(path),
-    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", () => cloud.ensureFolder(path))),
-    deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", () => cloud.removeFolder(path))),
+    // ── 统一列举：整个虚拟 FS 一次列举（local ∪ cloud，每项带解析好的 syncState）。offline-first 结构性保证在库内。──
+    listAllItems: (ctx: ListContext) => listing.listAllItems(ctx),
+    // ⛔ 旧列举接口已废（2026-07-01）——改用 store.listAllItems(ctx)。
+    //   listAllItems = 全部文件的唯一统一视图；local/cloud 不是两个来源、是 Item 的属性（syncState）。
+    //   "只要本地 / 只要云端" 的想法 = 没理解这个模型（= mergeLocalCloud/localKeys 越狱的复发，正是 JRP 登出看不了
+    //   本地论文的根因）。**请完整重构调用方**：别用 justLocal/justRemote 取巧参数、别 deep import cloud.listAll/local.appKeys。
+    //   详 CONTEXT.md §反-duplicate + listing.ts。
+    // list: () => cloud.list(),          // ← 用 listAllItems(ctx)
+    // listAll: () => cloud.listAll(),    // ← 用 listAllItems(ctx)（cloud.listAll 仅库内 listing/reconcile 用）
+    // localKeys: () => local.appKeys(),  // ← 用 listAllItems(ctx) 的 item.syncState + isCached()（不再单列本地半截）
+    // 文件夹操作（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainFolders 补建）。
+    ensureFolder: (path: string) => ensureFolderLocalFirst(path),
+    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", () => ensureFolderLocalFirst(path))),
+    deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
+      const wasPending = readPending().includes(path);
+      clearPendingFolder(path);                                   // 离线建的（从没上云）→ 清登记即删
+      if (!isOnline()) { if (wasPending) return true; throw new Error("离线：无法删除已上云的文件夹"); }
+      return cloud.removeFolder(path);
+    })),
+    drainFolders,   // 回线补建离线创建的空夹（app 在 online / listGallery 时调，对齐 drainDeleteQueue）
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
@@ -319,7 +354,7 @@ export function createStore(config: StoreConfig) {
 
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
     listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）
-    localKeys: () => local.appKeys(),     // 已缓存的应用文件名集合（gallery 批量判 cached）
+    // localKeys 已废（见上）——离线可读性经 store.listAllItems(ctx) 的 item.syncState + isCached() 判定，不再单列本地半截。
     restore: singleFlight("恢复", trashMod.restore),
     purge: singleFlight("彻底删除", trashMod.purge),
     emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),

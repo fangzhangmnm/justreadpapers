@@ -23,6 +23,7 @@ import "./cloud-sync.test.ts";
 import "./provider.test.ts";
 import "./settings.test.ts";
 import "./gallery-model.test.ts";
+import "./listing.test.ts";
 import { run } from "./_harness.ts";
 
 await run();

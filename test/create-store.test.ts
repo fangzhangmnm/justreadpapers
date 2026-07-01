@@ -113,6 +113,6 @@ test("file.delete 经 store", async () => {
   const f = s.file("gone.pdf", { isZip: false });
   await f.save(enc("BYE"));
   await f.delete();
-  const list = await s.list();
-  assert(!list.some((it) => it.name === "gone.pdf"), "删后列表不含（进了 .trash）");
+  const { items } = await s.listAllItems({ signedIn: true, online: true });   // 统一列举（旧 s.list 已废）
+  assert(!items.some((it) => it.path === "gone.pdf"), "删后列表不含（进了 .trash + 本地移除）");
 });
