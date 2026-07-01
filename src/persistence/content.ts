@@ -2,21 +2,22 @@
 // PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
 // 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
 
-import type { Bytes, Store } from "../store/index.ts";
+import type { Bytes, Store, ListContext, SyncState } from "../store/index.ts";
 
 export interface PaperFile {
   path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"
   fileName: string;   // basename
   folder: string;     // 所在文件夹（folder-tree 用），如 "papers"
   size: number;
+  syncState: SyncState;   // store 解析好的 8-badge（residency ⟂ sync-status）
 }
 
 /** 回收站一项（去掉 move-aside 时间戳后的显示名 + 云端 item id）。 */
 export interface TrashEntry { cloudId: string; name: string; }
 
 export interface Content {
-  /** 列 approot 下所有 PDF + 文件夹。complete=false → 列举有子树失败，别据此删缓存。 */
-  listTree(): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
+  /** 列 approot 下所有 PDF + 文件夹（local ∪ cloud 统一列举；离线/登出=纯本地，绝不返空）。complete=false → 云 walk 有子树失败/离线，别据此删缓存。 */
+  listTree(ctx: ListContext): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
   /** 回收站列表（.trash 里的 PDF；name 已去 [时间戳]）。 */
   listTrash(): Promise<TrashEntry[]>;
   /** 备份箱列表（.backup 里的 loser 字节；恢复/彻底删走通用 restore/purge）。 */
@@ -31,8 +32,6 @@ export interface Content {
   keepOffline(path: string): Promise<void>;
   /** 移除本地副本（守卫式 offload；非法=唯一副本/不可重取 → 抛错出 banner，不静默丢）。 */
   offload(path: string): Promise<void>;
-  /** 已留作离线（=有本地副本）的应用文件路径集合（gallery 批量判）。 */
-  keptOfflineKeys(): Promise<Set<string>>;
   /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */
   read(path: string): Promise<Blob | null>;
   /** 摄入：上传 PDF（新文件；store 红线 never-overwrite）。 */
@@ -49,17 +48,17 @@ export interface Content {
 function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
 function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
 
-type ContentStore = Pick<Store, "file" | "listAll" | "ensureFolder" | "deleteFolder" | "listTrash" | "listBackup" | "restore" | "purge" | "emptyTrash" | "localKeys">;
+type ContentStore = Pick<Store, "file" | "listAllItems" | "ensureFolder" | "deleteFolder" | "listTrash" | "listBackup" | "restore" | "purge" | "emptyTrash">;
 
 const stripStamp = (n: string): string => n.replace(/ \[[^\]]*\]$/, "");   // 去 move-aside 的 [yyyymmddhhmmss-guid]
 
 export function createContent(store: ContentStore): Content {
   const raw = (path: string) => store.file(path, { isZip: false });
   return {
-    async listTree() {
-      const { files, folders, complete } = await store.listAll();
+    async listTree(ctx) {
+      const { items, folders, complete } = await store.listAllItems(ctx);   // 统一列举：local ∪ cloud，离线/登出=纯本地
       return {
-        files: files.map((it) => ({ path: it.path, fileName: baseName(it.path), folder: dirName(it.path), size: it.size })),
+        files: items.map((it) => ({ path: it.path, fileName: baseName(it.path), folder: dirName(it.path), size: it.size ?? 0, syncState: it.syncState })),
         folders, complete,
       };
     },
@@ -86,6 +85,5 @@ export function createContent(store: ContentStore): Content {
     async emptyTrash() { const r = await store.emptyTrash({ scope: "both" }); return { purged: r.purged ?? 0, failed: r.failed ?? [] }; },
     async keepOffline(path) { await raw(path).keepOffline(); },
     offload(path) { return raw(path).offload(); },
-    async keptOfflineKeys() { return new Set(await store.localKeys()); },
   };
 }

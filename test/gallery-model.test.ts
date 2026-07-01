@@ -1,8 +1,9 @@
 import { test, eq } from "./_harness.ts";
 import { pathFolder, pathBasename, pathJoin, buildItems, sliceFolder, breadcrumb } from "../src/gallery-model.ts";
 import type { CatalogMeta } from "../src/gallery-model.ts";
+import type { SyncState } from "../src/store/index.ts";
 
-const f = (name: string): { name: string; path: string } => ({ name, path: "papers/" + name });
+const f = (name: string, syncState: SyncState = "synced") => ({ name, path: "papers/" + name, syncState });
 
 test("path 代数", () => {
   eq(pathFolder("组合/x.pdf"), "组合", "有夹");

@@ -2,7 +2,8 @@
 // 扁平路径名(用 "/" 表文件夹层级,无真嵌套结构)+ 当前文件夹切片 → 嵌套文件夹免费、零 tree-sync bug。
 // JRP 适配:无 local-session(PDF 是云镜像);item = 云 PDF 文件 ⊕ catalog 元数据(标题/docId/缓存态)。
 // **丢掉** WebPaint 的:加密、copy、ghost/cloud-gone 收敛(那是 store 域)、dirty-sync badge、多选。
-// 零 DOM / 零网络 / 零 store → 可单测。
+// 零 DOM / 零网络 / 零 store（仅 type-only 借 SyncState，运行时不拉 store）→ 可单测。
+import type { SyncState } from "./store/index.ts";
 
 // ── 路径代数(lift) ──────────────────────────────────────────────────────────
 export function pathFolder(name: string): string { const i = name.lastIndexOf("/"); return i < 0 ? "" : name.slice(0, i); }
@@ -19,16 +20,16 @@ export interface GalleryItem {
   path: string;       // approot 完整路径(content 操作用),如 "papers/Wei 2011.pdf"
   title: string;      // 展示标题(catalog 有则用,否则 basename 去 .pdf)
   docId?: string;     // catalog 身份(有 = 记过阅读位置)
-  keptOffline?: boolean;   // 本地有副本(已留作离线/离线可读)。无 LRU、无独立 pin → 单一态
+  syncState: SyncState;    // store 解析好的 8-badge（residency ⟂ sync-status）；UI 可据此画 ⟳/⚠/👻 等
+  keptOffline?: boolean;   // = 有本地副本(离线可读) = syncState ≠ "cloud-only"。留作现有 UI 徽章
 }
 export interface CatalogMeta { docId: string; name: string; title?: string; }   // name = 相对 papers 根的路径
 
 // 云 PDF 文件(已剥 papers/ 前缀的 {name,path})⊕ catalog → items(标题/docId 来自 catalog,按相对路径配——
 // 不用 basename,否则不同文件夹同名会撞)。keptOffline 由 host 注入判定函数。
 export function buildItems(
-  files: { name: string; path: string }[],
+  files: { name: string; path: string; syncState: SyncState }[],
   catalogByName: Map<string, CatalogMeta>,
-  isKeptOffline?: (path: string) => boolean,
 ): GalleryItem[] {
   return files.map((f) => {
     const meta = catalogByName.get(f.name);
@@ -37,7 +38,8 @@ export function buildItems(
       path: f.path,
       title: meta?.title || pathBasename(f.name).replace(/\.pdf$/i, ""),
       docId: meta?.docId,
-      keptOffline: isKeptOffline ? isKeptOffline(f.path) : false,
+      syncState: f.syncState,
+      keptOffline: f.syncState !== "cloud-only",   // = isCached(syncState)：非 cloud-only = 有本地副本 = 离线可读
     };
   });
 }

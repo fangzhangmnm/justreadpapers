@@ -79,7 +79,10 @@ export function createPersistence(hooks: PersistenceHooks): Persistence {   // r
   // 重连重放离线删队列（base-etag 守卫：被别处改过/同名新文件 → edit-wins 不删，绝不盲删别设备新文件）。
   //   单 app 单例，监听不卸；listGallery 也会 drain 一次（覆盖「离线删→重连后开图库」路径）。
   if (typeof window !== "undefined") {
-    window.addEventListener("online", () => { void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e)); });
+    window.addEventListener("online", () => {
+      void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e));
+      void store.drainFolders().catch((e) => console.warn("[jrp] drainFolders", e));   // 回线补建离线创建的空夹
+    });
   }
 
   const catalog = createCatalog({ collection: store.collection<CatalogPayload>(cfg.CATALOG_NAME, { manual: true }) });
@@ -114,21 +117,23 @@ export function createPersistence(hooks: PersistenceHooks): Persistence {   // r
     auth, catalog, content, settings, save,
     async listGallery() {
       const prefix = cfg.PAPERS_FOLDER + "/";
+      // 统一列举 ctx（store 吃 {signedIn, online} 返解析好的 syncState）。离线/登出 → 纯本地，绝不返空。
+      const ctx = { signedIn: auth.isSignedIn(), online: typeof navigator !== "undefined" ? navigator.onLine !== false : true };
       try {
         // cloud-gone 收敛（安全子集 #43）：clean 孤儿→local-only（不删不 trash）。失败/离线/partial 自 no-op。
         await store.reconcile().catch((e) => console.warn("[jrp] reconcile", e));
         void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e));   // 重放离线删（开图库/刷新时机，覆盖重连）
+        void store.drainFolders().catch((e) => console.warn("[jrp] drainFolders", e));           // 回线补建离线创建的空夹
 
-        const tree = await content.listTree();
+        const tree = await content.listTree(ctx);
         const files = tree.files
           .filter((f) => f.path.startsWith(prefix) && /\.pdf$/i.test(f.path))
-          .map((f) => ({ name: f.path.slice(prefix.length), path: f.path }));
+          .map((f) => ({ name: f.path.slice(prefix.length), path: f.path, syncState: f.syncState }));
         const folders = tree.folders
           .filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length)).filter((p) => p.length > 0);
         const catMap = new Map<string, CatalogMeta>();
         for (const d of catalog.list()) catMap.set(d.fileName, { docId: d.id, name: d.fileName, title: d.title });
-        const kept = await content.keptOfflineKeys().catch(() => new Set<string>());
-        const items = buildItems(files, catMap, (p) => kept.has(p));
+        const items = buildItems(files, catMap);   // keptOffline/badge 由 item.syncState 派生（store 单一来源，app 不再单列本地半截）
         return { items, folders, complete: tree.complete };
       } catch {
         return { items: [], folders: [], complete: false };

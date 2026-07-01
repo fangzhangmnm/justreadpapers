@@ -61,7 +61,7 @@ export const App = defineComponent({
     const galBackup = ref<{ cloudId: string; name: string }[]>([]);   // 备份箱项（懒加载）
     const galCurrentFolder = ref("");   // Gallery 当前层（@folderchange 汇报）；拖拽上传落点用
     async function refreshGallery(): Promise<void> {
-      if (!galSignedIn.value) { galItems.value = []; galFolders.value = []; return; }
+      // offline-first（红线：无账号可用）：未登录/离线也刷——listGallery 走统一列举返本地论文，登出不再清空。
       galLoading.value = true;
       try { const g = await persistence().listGallery(); galItems.value = g.items; galFolders.value = g.folders; }
       finally { galLoading.value = false; }
