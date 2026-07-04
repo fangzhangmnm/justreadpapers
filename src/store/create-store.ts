@@ -18,6 +18,7 @@ import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
 import { createCollection, type Collection } from "./collection.ts";
 import { createListing, type ListContext } from "./listing.ts";
+import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
@@ -35,6 +36,9 @@ export interface StoreUI {
   //   （iOS 登录态老 token acquireTokenSilent iframe 永不 resolve→fetchMeta 挂死时的唯一逃生）。
   // 不实现 → 无逃生闸（退回纯 isOnline 守卫 + 裸 await）。settle() 在检查结束后清理 skip UI。
   offlineEscape?: () => { probe: Promise<unknown>; settle: () => void };
+  // ── ADR-0018 离线「新上传」回线补推的 UI seam。**policy≠'manual' 时必填**（ctor 强校验，禁 noop/silent）──
+  onReplayStatus?: (evt: { phase: "start" | "pushed" | "collision" | "done"; name?: string; done: number; total: number }) => void;   // 进度/冲突 surface（非 busy，走状态行/toast）
+  confirmReplay?: (count: number) => Promise<boolean>;   // 'ask' 模式：回线/成功连接问一次「N 篇离线上传现在同步到云端？」
 }
 
 export interface StoreConfig {
@@ -61,6 +65,7 @@ export interface StoreConfig {
   validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
+  offlineUploadReplay?: UploadReplayPolicy;           // ADR-0018：离线「新上传」回线补推策略 auto|ask|manual（默认 manual；WebPaint=manual、JRP=ask）
 }
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
@@ -146,6 +151,28 @@ export function createStore(config: StoreConfig) {
     looksEncrypted: (b) => looksEncryptedContainer(b),
   });
   const pushMod = createPush({ cloud, head, seal, safeResolve, serialize: sub.serialize, editVersion: () => sub.edits.version(), busy: ui.busy });
+
+  // ── ADR-0018 离线「新上传」回线补推（仅 never-synced float；编辑仍 consent-surface）────────────
+  const uploadReplayPolicy: UploadReplayPolicy = config.offlineUploadReplay ?? "manual";
+  if (uploadReplayPolicy !== "manual") {   // 强制 UI（禁 noop/silent），对齐 busy/resolveConflict/reportError 的必填律
+    if (!ui.onReplayStatus) throw new Error("createStore: offlineUploadReplay≠'manual' 需 ui.onReplayStatus（ADR-0018 强制 UI 提示）");
+    if (uploadReplayPolicy === "ask" && !ui.confirmReplay) throw new Error("createStore: offlineUploadReplay='ask' 需 ui.confirmReplay（回线询问用户）");
+  }
+  // 后台 push 实例：与 pushMod 同深模块编排，唯 busy 换透传——drain 不锁屏（ADR-0018 §4：非 busy 后台）。
+  const pushBg = createPush({ cloud, head, seal, safeResolve, serialize: sub.serialize, editVersion: () => sub.edits.version(), busy: (_l, fn) => fn() });
+  async function pushLocalBytes(name: string): Promise<{ status: string }> {
+    const blob = await local.get(name);
+    if (!blob) return { status: "no-local" };
+    const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
+    const plain = await seal.unsealForRead(name, asBlob);   // 得明文（JRP 不加密=原字节）
+    if (!plain) return { status: "locked" };
+    const plainU8 = await toU8(plain);
+    return pushBg.doPush(name, { encode: () => plainU8 });   // 非 busy、未串行（uploadReplay 已 per-name serialize）；CloudNameCollisionError 抛出→出队 surface
+  }
+  const uploadReplay = createUploadReplay({
+    kv, local, head, isOnline, serialize: sub.serialize, pushLocal: pushLocalBytes,
+    policy: uploadReplayPolicy, confirm: ui.confirmReplay, onStatus: ui.onReplayStatus,
+  });
   const fresh = createFreshness({ cloud, head, safeResolve, busy: ui.busy });
   const del = createDelete({ cloud, local, head, kv, busy: ui.busy });
   const identity = createIdentity({ cloud, local, head, doPush: pushMod.doPush, serialize: sub.serialize, serialize2: sub.serialize2, seal, busy: ui.busy });
@@ -169,7 +196,7 @@ export function createStore(config: StoreConfig) {
       return Promise.resolve().then(() => fn(...a)).finally(() => { _userWriteInFlight = null; });
     };
   }
-  const delSF = singleFlight("删除", (n: string) => del.del(n, { isOnline }));   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
+  const delSF = singleFlight("删除", (n: string) => { uploadReplay.remove(n); return del.del(n, { isOnline }); });   // 删=supersede：从补推队列摘掉（ADR-0018）   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
   const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
 
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（必填，绝不静默 cancel）──
@@ -266,6 +293,9 @@ export function createStore(config: StoreConfig) {
         await sub.serialize(name, () => local.save(name, sealed));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError(e); }
+        // ADR-0018：离线「新上传」补推——push 没成(仍 dirty) ∧ 从没 synced(seenBase null) → 入队，回线 drainUploadQueue 补推。
+        //   （编辑已同步文件 seenBase≠null → 不入队，仍走 consent-surface。enqueue 对 manual policy 内部 no-op。）
+        if (head.isDirty(name) && head.seenBase(name) == null) uploadReplay.enqueue(name);
       },
       async open() {
         if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
@@ -350,6 +380,7 @@ export function createStore(config: StoreConfig) {
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
+    drainUploadQueue: () => uploadReplay.drain(),   // ADR-0018：回线/成功连接补推离线新上传（app 在 online/boot 调；ask 模式内部先问）
     reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),   // gallery list-fetch 时调：clean 孤儿→local-only（不删不 trash）
 
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
