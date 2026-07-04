@@ -58,6 +58,24 @@ test("touch bump recency → 成为 lastActive", async () => {
   await cat.commitNow();
 });
 
+test("rekey 迁移条目：新 path-key 承接 position，老 key 消失（②太监砍后 in-app 改名不丢位置）", async () => {
+  const clock = { t: 1000 };
+  const cat = mk(createMockProvider(), clock);
+  cat.upsert("old.pdf", { fileName: "old.pdf", title: "T" });
+  cat.setPosition("old.pdf", { pageIndex: 9, yFraction: 0.5 });
+  clock.t = 2000; cat.rekey("old.pdf", "组合/new.pdf");
+  eq(cat.get("old.pdf"), undefined, "老 key 没了");
+  const moved = cat.get("组合/new.pdf");
+  assert(moved !== undefined, "新 key 存在");
+  eq(moved!.fileName, "组合/new.pdf", "fileName = 新 path");
+  eq(moved!.title, "T", "title 承接");
+  eq(moved!.position?.pageIndex, 9, "position 承接（位置不丢）");
+  eq(cat.list().length, 1, "list 只剩迁移后一条");
+  cat.rekey("组合/new.pdf", "组合/new.pdf");   // 同名 no-op
+  eq(cat.get("组合/new.pdf")?.position?.pageIndex, 9, "同名 rekey no-op 不损坏");
+  await cat.commitNow();
+});
+
 test("持久化 round-trip：A commitNow → B init 读回(真 collection+cloud-sync+mock)", async () => {
   const provider = createMockProvider();
   const A = mk(provider, { t: 1000 });
