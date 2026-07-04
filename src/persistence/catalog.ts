@@ -34,6 +34,8 @@ export interface Catalog {
   touch(docId: string): void;
   trash(docId: string): void;
   restore(docId: string): void;
+  /** 改名/移动：身份=path，key 变即迁移条目（新 key 承接 position/title，老 key 删）。in-app 改名不丢位置。 */
+  rekey(oldId: string, newId: string): void;
   lastActiveId(): string | null;
   subscribe(fn: (docs: CatalogDoc[]) => void): () => void;
   commitNow(): Promise<void>;
@@ -83,6 +85,14 @@ export function createCatalog(opts: CatalogOpts): Catalog {
     touch(docId): void { if (c.getItem(docId)) put(docId, {}, true); },
     trash(docId): void { if (c.getItem(docId)) put(docId, { deleted: true }, true); },
     restore(docId): void { if (c.getItem(docId)) put(docId, { deleted: false }, true); },
+    rekey(oldId, newId): void {
+      if (oldId === newId) return;
+      const old = c.getItem(oldId);
+      if (!old) return;
+      c.upsertItem({ ...old, id: newId, fileName: newId });   // 新 path-key 承接全 payload（position/title/addedAt/lastReadAt）
+      c.deleteItem(oldId);                                     // 老 key 移入 collection trash（whole-item LWW）
+      notify(); scheduleFlush();
+    },
     lastActiveId(): string | null { const a = sortedActive(); return a.length ? a[0].id : null; },
     subscribe(fn): () => void { subs.add(fn); return () => { subs.delete(fn); }; },
     commitNow: () => { clearFlush(); return c.flush(); },   // 清 debounce timer + 立即推（valuable-save / 显式点）

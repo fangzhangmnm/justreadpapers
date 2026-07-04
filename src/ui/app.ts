@@ -1,9 +1,9 @@
 // 根组件 = shell 编排。顶栏精简(左:文件夹+目录;中:标题;右:状态+☰),所有选项进 ☰(user 2026-06-21)。
-// 打开论文:read 云字节→docId→catalog upsert/touch→viewer+复位。boot→jumpscare(自动开 lastActive)。
+// 打开论文:read 云字节→path 即身份(catalog key)→upsert/touch→viewer+复位。boot→jumpscare(自动开 lastActive)。
+//   （身份=path/name，砍了旧内容哈希 docId「太监」——身份=path 单 SSoT，改名/移动经 catalog.rekey 迁移。）
 import { defineComponent, ref, computed, reactive, onMounted } from "../vendor/vue/vue.esm-browser.prod.js";
 import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
-import { contentDocId } from "../domain/doc-id.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
 import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, cloudCheckUi, skipToOffline } from "../app-state.ts";
 import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
@@ -81,7 +81,7 @@ export const App = defineComponent({
       if (newPath === p.item.path) return;
       void withGalleryBusy(async () => {
         await persistence().content.rename(p.item.path, newPath);
-        if (p.item.docId) persistence().catalog.upsert(p.item.docId, { fileName: rel });
+        if (p.item.docId) persistence().catalog.rekey(p.item.docId, rel);   // path=身份：移动即迁移 catalog 条目（位置跟着走）
       }, "已移动", "移动失败(同名?)");
     }
     function onGalKeepOffline(it: GalleryItem): void {
@@ -114,7 +114,7 @@ export const App = defineComponent({
       if (newPath === p.item.path) return;
       void withGalleryBusy(async () => {
         await persistence().content.rename(p.item.path, newPath);
-        if (p.item.docId) persistence().catalog.upsert(p.item.docId, { fileName: newPath.slice(PAPERS_FOLDER.length + 1) });
+        if (p.item.docId) persistence().catalog.rekey(p.item.docId, newPath.slice(PAPERS_FOLDER.length + 1));   // path=身份：改名即迁移（位置不丢）
       }, "已改名", "改名失败");
     }
     function onGalTrash(it: GalleryItem): void {
@@ -151,7 +151,7 @@ export const App = defineComponent({
     // 落点：图库开着→当前文件夹；否则→papers 根。上传完 onGalUpload 自动打开最后一份。
     const dragActive = ref(false);
     let dragDepth = 0;
-    const canDrop = (): boolean => galSignedIn.value;   // 上传需登录；未登录不亮蒙层、drop 提示登录
+    const canDrop = (): boolean => true;   // offline-first：未登录/离线也能拖（存本地，登录/回线后同步）——红线「无账号可用」
     function onDragEnter(e: DragEvent): void {
       if (!dtHasFiles(e.dataTransfer)) return;
       e.preventDefault(); if (!canDrop()) return;
@@ -168,7 +168,6 @@ export const App = defineComponent({
     function onDrop(e: DragEvent): void {
       if (!dtHasFiles(e.dataTransfer)) return;
       e.preventDefault(); dragDepth = 0; dragActive.value = false;
-      if (!canDrop()) { showToast("请先登录 OneDrive"); return; }
       const files = Array.from(e.dataTransfer?.files || []).filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
       if (!files.length) { showToast("不是 PDF，忽略"); return; }
       // 落点：图库开着→图库当前层；阅读模式→当前论文所在文件夹（user 钉）。
@@ -218,18 +217,22 @@ export const App = defineComponent({
         try { blob = await persistence().content.read(item.path); } catch { /* */ }
         P("content.read(取字节+云端etag检查)", t1);
         if (!blob) { showToast("读取失败(未登录/离线?)"); return; }
-        const t2 = performance.now();
-        const docId = await contentDocId(await blob.arrayBuffer());
-        P("contentDocId(算哈希)", t2);
         const cat = persistence().catalog;
-        if (!cat.get(docId)) cat.upsert(docId, { fileName: item.name, addedAt: nowMs() });
-        else cat.upsert(docId, { fileName: item.name });
-        cat.touch(docId);
-        currentDocId.value = docId; title.value = item.title; pos.value = null; outline.value = [];
+        // 身份 = path（相对 papers）。砍内容哈希「太监」：不再读字节算 hash（省一步 + 离线/新文件即时有身份）。
+        const key = item.name;
+        if (!cat.get(key)) {
+          // 一次性迁移：老内容哈希 key 的条目（fileName==name）→ rekey 到 path，保住阅读位置。
+          const legacy = cat.list().find((d) => d.fileName === item.name && d.id !== item.name);
+          if (legacy) cat.rekey(legacy.id, key);
+        }
+        if (!cat.get(key)) cat.upsert(key, { fileName: item.name, addedAt: nowMs() });
+        else cat.upsert(key, { fileName: item.name });
+        cat.touch(key);
+        currentDocId.value = key; title.value = item.title; pos.value = null; outline.value = [];
         currentPaperFolder.value = pathFolder(item.name);   // 阅读模式拖拽 → 落当前论文同夹
-        const restore = cat.get(docId)?.position ?? null;
+        const restore = cat.get(key)?.position ?? null;
         const t3 = performance.now();
-        await v()?.loadBlob(blob, { key: docId, pos: restore });
+        await v()?.loadBlob(blob, { key, pos: restore });
         P("loadBlob(渲染+定位到pagesloaded)", t3);
       });
       P("openPaper 总计", tAll);
