@@ -31,6 +31,30 @@ test("file round-trip：A.save → 云端 → B.open 读回（脱绕，全走 cr
   eq(await asStr(blob), "PDFBYTES", "B 从云端拉回 A 存的");
 });
 
+test("[ADR-0018] 离线 save 入队 → 回线 auto drain 补推 → 另一设备读到", async () => {
+  const provider = createMockProvider();
+  let online = true;
+  const realUpload = provider.upload.bind(provider);
+  provider.upload = ((...a: Parameters<typeof realUpload>) => online ? realUpload(...a) : Promise.reject(new Error("offline"))) as typeof provider.upload;
+  const kv = memKv();
+  const A = createStore({
+    provider, kv, local: createMockLocal(), syncedSettingsFileName: "s.json",
+    isOnline: () => online, offlineUploadReplay: "auto",
+    ui: { busy: (_l, fn) => fn(), resolveConflict: async () => "cancel" as const, reportError: () => {}, onReplayStatus: () => {} },
+  });
+  online = false;                                        // 离线
+  const f = A.file("papers/x.pdf", { isZip: false });
+  await f.save(enc("OFFLINEPDF"));                        // push 失败 → 入队
+  assert(f.isDirty(), "离线 save → 脏（未推）");
+  eq((await A.listAllItems({ signedIn: true, online: false })).items.find((i) => i.path === "papers/x.pdf")?.syncState, "float", "never-synced dirty = float");
+  online = true;                                         // 回线
+  const r = await A.drainUploadQueue();
+  eq(r.pushed, 1, "回线 auto 补推 1 篇");
+  assert(!f.isDirty(), "补推成功 → 干净");
+  const B = mkStore(provider);                            // 另一设备（空 local）
+  eq(await asStr(await B.file("papers/x.pdf", { isZip: false }).open()), "OFFLINEPDF", "离线传的论文真上了云、B 读到");
+});
+
 test("file save 后本地干净（推成功清脏）", async () => {
   const s = mkStore(createMockProvider());
   const f = s.file("a.pdf", { isZip: false });

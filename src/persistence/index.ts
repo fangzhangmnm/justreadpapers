@@ -42,6 +42,8 @@ export interface PersistenceHooks {
   onBusy?: (label: string | null) => void;   // 全屏遮罩驱动（store 危险写操作锁屏；label=进入、null=退出，ref-count 在 host）
   resolveConflict: StoreUI["resolveConflict"];                 // 冲突 sheet（红线：冲突必 surface，必传，绝不静默 cancel）
   offlineEscape?: NonNullable<StoreUI["offlineEscape"]>;       // 云检查「跳过到离线」逃生闸（fetchMeta 挂死时用户即超时）；不给 → 无逃生
+  confirmReplay: NonNullable<StoreUI["confirmReplay"]>;        // ADR-0018 'ask'：回线问一次「N 篇离线上传现在同步？」（必传，store ctor 强校验）
+  onReplayStatus: NonNullable<StoreUI["onReplayStatus"]>;      // 补推进度/冲突 surface（必传，非 silent）
 }
 
 export interface Persistence {
@@ -53,6 +55,7 @@ export interface Persistence {
   listGallery(): Promise<{ items: GalleryItem[]; folders: string[]; complete: boolean }>;
   recordPosition(docId: string, pos: Position): void;
   boot(): Promise<{ signedIn: boolean }>;
+  syncOfflineUploads(): Promise<void>;   // ADR-0018：回线/登录成功补推离线新上传（app 在 online/onAuthChanged 调）
 }
 
 export function createPersistence(hooks: PersistenceHooks): Persistence {   // resolveConflict 必传（冲突必 surface）
@@ -66,6 +69,8 @@ export function createPersistence(hooks: PersistenceHooks): Persistence {   // r
     reportError: (e) => { console.warn("[jrp][store]", e); hooks.onError?.("同步出错(已保留本地，稍后自动重试)"); },
     resolveConflict: hooks.resolveConflict,   // 必传：真冲突 sheet（app-state resolveConflictUi）
     offlineEscape: hooks.offlineEscape,        // undefined → store 退回纯 isOnline 守卫（无逃生闸）
+    confirmReplay: hooks.confirmReplay,        // ADR-0018 'ask'：回线补推前问一次
+    onReplayStatus: hooks.onReplayStatus,      // 补推进度/冲突 surface
   };
   // validateAdopt（必传，禁 placeholder）：采纳云端字节覆盖本地前验真 PDF（%PDF- magic）。
   //   挡机场/captive-portal 200-HTML、损坏副本覆盖好缓存（论文丢了也麻烦）。库对加密透明 → 拿到的是
@@ -74,14 +79,23 @@ export function createPersistence(hooks: PersistenceHooks): Persistence {   // r
     const h = new Uint8Array(await plain.slice(0, 5).arrayBuffer());
     return h[0] === 0x25 && h[1] === 0x50 && h[2] === 0x44 && h[3] === 0x46 && h[4] === 0x2d;   // "%PDF-"
   };
-  const store = createStore({ provider, ui, validateAdopt });   // local=idb、kv=localStorage 库内默认装配
+  const store = createStore({ provider, ui, validateAdopt, offlineUploadReplay: "ask" });   // local=idb、kv=localStorage 库内默认装配；离线新上传回线 ask 补推（ADR-0018）
 
   // 重连重放离线删队列（base-etag 守卫：被别处改过/同名新文件 → edit-wins 不删，绝不盲删别设备新文件）。
   //   单 app 单例，监听不卸；listGallery 也会 drain 一次（覆盖「离线删→重连后开图库」路径）。
+  // ADR-0018 离线新上传回线补推：online 事件 + 登录成功（app onAuthChanged 调 syncOfflineUploads）触发。
+  //   in-flight 守卫防 online 与 auth-success 同时 double-ask；ask 模式对空队列内部早退（不弹）。
+  let _replayInFlight = false;
+  async function syncOfflineUploads(): Promise<void> {
+    if (_replayInFlight) return;
+    _replayInFlight = true;
+    try { await store.drainUploadQueue(); } catch (e) { console.warn("[jrp] drainUploadQueue", e); } finally { _replayInFlight = false; }
+  }
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => {
       void store.drainDeleteQueue().catch((e) => console.warn("[jrp] drainDeleteQueue", e));
       void store.drainFolders().catch((e) => console.warn("[jrp] drainFolders", e));   // 回线补建离线创建的空夹
+      void syncOfflineUploads();                                                        // 回线补推离线新上传（ask）
     });
   }
 
@@ -114,7 +128,7 @@ export function createPersistence(hooks: PersistenceHooks): Persistence {   // r
   });
 
   return {
-    auth, catalog, content, settings, save,
+    auth, catalog, content, settings, save, syncOfflineUploads,
     async listGallery() {
       const prefix = cfg.PAPERS_FOLDER + "/";
       // 统一列举 ctx（store 吃 {signedIn, online} 返解析好的 syncState）。离线/登出 → 纯本地，绝不返空。

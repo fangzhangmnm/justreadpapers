@@ -5,7 +5,7 @@ import { defineComponent, ref, computed, reactive, onMounted } from "../vendor/v
 import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
-import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, cloudCheckUi, skipToOffline } from "../app-state.ts";
+import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, cloudCheckUi, skipToOffline, replayUi, answerReplay } from "../app-state.ts";
 import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -279,6 +279,7 @@ export const App = defineComponent({
         galSignedIn.value = !!(st && st.signedIn);
         galAccount.value = acctName(st);
         void refreshGallery();
+        if (st && st.signedIn) void persistence().syncOfflineUploads();   // 登录成功 → 补推离线新上传（ADR-0018 ask；in-flight 守卫防重）
         // 登录态到达 → 后台云端 catalog 同步（不遮罩、不重开；论文/图库已由 ① 决定）。
         if (st && st.signedIn && !cloudSynced) { cloudSynced = true; void doResume(false); }
       });
@@ -286,7 +287,7 @@ export const App = defineComponent({
         const st = await auth.initAuth();
         galSignedIn.value = !!st.signedIn;
         galAccount.value = acctName(st);
-        if (st.signedIn) cloudSynced = true;   // 已登录：① 即云端续读，onAuthChanged 不再重复跑 ②
+        if (st.signedIn) { cloudSynced = true; void persistence().syncOfflineUploads(); }   // 已登录：① 即云端续读；补推离线新上传（ADR-0018）
         await doResume(true);                   // 唯一带遮罩的续读；未登录/probing 也在此优雅落地
       } catch { await doResume(true); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
@@ -306,7 +307,7 @@ export const App = defineComponent({
       galItems, galFolders, galLoading, galSignedIn, galAccount, galTrash, galBackup, dragActive,
       onGalRename, onGalTrash, onGalNewFolder, onGalDeleteFolder, onGalUpload, onGalFolderChange, refreshGallery,
       onGalLoadBin, onGalMove, onGalKeepOffline, onGalOffload, onGalRestore, onGalPurge, onGalEmptyTrash, confirmState, confirmAnswer,
-      conflictUi, answerConflict, cloudCheckUi, skipToOffline,
+      conflictUi, answerConflict, cloudCheckUi, skipToOffline, replayUi, answerReplay,
       onGalSignin: (): void => { void persistence().auth.signIn(); },
       onGalSignout: (): void => { void persistence().auth.signOut(); },
       onGalleryOpen,
@@ -397,6 +398,15 @@ export const App = defineComponent({
           <button class="jrp-btn" @click="answerConflict('cancel')">先不动</button>
           <button class="jrp-btn" @click="answerConflict('takeCloud')">用云端</button>
           <button class="jrp-btn jrp-btn-dark" @click="answerConflict('keepMine')">保留我的</button>
+        </div>
+      </div>
+      <div class="jrp-confirm-backdrop" v-if="replayUi.open" @click="answerReplay(false)"></div>
+      <div class="jrp-confirm" v-if="replayUi.open">
+        <div class="jrp-confirm-title">同步离线上传</div>
+        <div class="jrp-confirm-body">有 {{ replayUi.count }} 篇离线时上传的论文，现在同步到云端？（大文件 + 慢网可稍后）</div>
+        <div class="jrp-confirm-btns">
+          <button class="jrp-btn" @click="answerReplay(false)">稍后</button>
+          <button class="jrp-btn jrp-btn-dark" @click="answerReplay(true)">现在同步</button>
         </div>
       </div>
       <div class="jrp-busy" v-if="appUi.busy"><div class="jrp-busy-spin"></div><div class="jrp-busy-label">{{ appUi.busy }}</div><button class="jrp-btn jrp-busy-skip" v-if="cloudCheckUi.skippable" @click="skipToOffline">跳过到离线</button></div>

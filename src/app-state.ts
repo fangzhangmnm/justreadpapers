@@ -35,6 +35,21 @@ export function answerConflict(choice: ConflictChoice): void {
   conflictUi.open = false; const r = _conflictResolve; _conflictResolve = null; if (r) r(choice);
 }
 
+// ── 离线上传补推确认 sheet（ADR-0018 'ask' 模式：回线/成功连接问一次整批；家族禁系统 confirm）──
+export const replayUi = reactive({ open: false, count: 0 });
+let _replayResolve: ((ok: boolean) => void) | null = null;
+function confirmReplayUi(count: number): Promise<boolean> {
+  replayUi.open = true; replayUi.count = count;
+  return new Promise<boolean>((res) => { _replayResolve = res; });
+}
+export function answerReplay(ok: boolean): void {
+  replayUi.open = false; const r = _replayResolve; _replayResolve = null; if (r) r(ok);
+}
+function onReplayStatus(evt: { phase: string; name?: string; done: number; total: number }): void {
+  if (evt.phase === "done") { if (evt.done > 0) pushToast(`已同步 ${evt.done} 篇离线上传到云端`); }
+  else if (evt.phase === "collision") pushToast(`「${evt.name}」云端已有同名，未覆盖——改名后重传`);
+}
+
 // 加密密码不走 store ui（非交互 crypt.getPassword；JRP 不加密）→ 无密码 sheet。要加密的 app 在 busy 外自管解锁循环。
 
 // ── 云检查「跳过到离线」逃生闸（store 在 open 的 freshness 检查时驱动；红线：离线/挂死绝不卡 open）──
@@ -69,7 +84,7 @@ function setSaveState(s: "dirty" | "saving" | "saved"): void {
 let _p: Persistence | null = null;
 /** 懒装配 persistence(首次用时建;createOneDriveProvider 只配置不连网,安全)。错误/保存态注入回 appUi。 */
 export function persistence(): Persistence {
-  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, offlineEscape: offlineEscapeUi });
+  if (!_p) _p = createPersistence({ onError: pushToast, onSaveState: setSaveState, onBusy: (l) => { if (l != null) pushBusy(l); else popBusy(); }, resolveConflict: resolveConflictUi, offlineEscape: offlineEscapeUi, confirmReplay: confirmReplayUi, onReplayStatus });
   return _p;
 }
 /** 设备本地设置面(zoom factor / spread / theme)。app 调这个,不碰 localStorage。 */
