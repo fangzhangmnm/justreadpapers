@@ -4,3 +4,4 @@ journals/
 node_modules/
 tools/esbuild/
 .claude/
+journal/
