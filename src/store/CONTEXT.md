@@ -65,3 +65,13 @@ store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-sta
 - **失败-fetch 守卫（命门）**：`authoritative = 在线 ∧ listAll.complete ∧ files 非空`，否则整个 no-op——partial 里「缺失」≠云端真没了；空列表多半未登录/网抖。绝不据 partial/空列表降级。
 - **K1**：可传 `activeName` 跳过当前打开的 doc（JRP 的 PDF 只读、demote 也无害，可不传）。
 - **暂不做（仍 ⏸）**：裂卡 E / cloud-move A→B 的 **ghost UI / split-card / 阅读位置 re-key**（WebPaint 那版未真机验）。本模块只保证「clean 孤儿安全降级、绝不丢」，不解决 move 产生的重复卡或丢绑定。
+
+## migration / schema-version（深模块，ADR-0019）
+
+> 引擎存储名字锚定在此谱系；跨版本收敛靠**显式版本迁移**，不靠愈合（不写 `?? ora` 类 read-fallback）。
+
+- **schema-version** — kv 里一枚戳 `store.schema = vNNN-yyyymmdd`（如 `v001-20260709`）。字符串序即版本序（NNN 零填充）。= "这个客户端的 on-disk 结构有多新"，让陈旧可见（家族"缓存无失效机制→让龄可见"同源）。
+- **migration（深模块）** — 引擎内部，app 碰不到（ADR-0021 四面）。boot 时 `createStore` 在 ready-gate 前 `await runMigrations`：读戳 → 按有序注册表跑欠的迁移 → **run 成功后才盖新戳**（崩了不盖→重跑）。每次动 kv/IDB 结构加一条。
+- **幂等 + 崩溃安全** — put-by-key 覆盖；**先写新 + 盖戳，最后才删旧**（红线：绝不在目标 durably 写成前删源，护未推的世界唯一副本）。IDB 不能 node 测 → 纯分类器（dirty-split）单测 + 真机验。
+- **v001-20260709 webpaint-anchor** — WebPaint prod 名 → 锚定名（IDB `webpaint/sessions`→`sync-store-cache/blobs`、字段 `ora`→`blob`、`trash:`→`local-trash:`、`.backup-local/`→`local-backup:`、kv `webpaint.etag:`→`sync.etag:`、dirty 拆轨见下）。对 JRP/新装 = **no-op**（无 `webpaint.*` → 跳过盖戳）。
+- **dirty 双轨（ADR-0020）** — 工作文件 dirty 在 **local-head**（`head.dirty:`，缺失=clean）；collection dirty 在 **cloud-sync**（`sync.dirty:`，缺失=脏）。迁移按「是否 collection 名」路由；不认识的名字**保守当工作文件+留脏**（宁留勿丢）。
