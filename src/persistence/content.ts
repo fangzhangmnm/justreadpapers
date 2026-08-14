@@ -1,31 +1,28 @@
-// PDF 字节面（只读镜像 over createStore）。app 不碰 cloud/Graph/IDB——全走注入的 store。
+// PDF 字节面（只读镜像 over @internal/store）。app 不碰 cloud/Graph/IDB——全走注入的 store 两面(file/files)。
 // PDF 读经 store.file(path).open() → **白得离线缓存**（open 自动把云端字节缓存本地，库强制）。
-// 摄入/改名/软删走 store.file 的 save/rename/delete（move-aside / never-overwrite 红线在库内）。
+// 摄入/改名/软删走 store.file 的 save/tryMove/delete（move-aside / never-overwrite 红线在库内；
+//   mode:"new" = 新建撞名即抛，mode:"existing" = 编辑既有）。
+// 列举面（watchFolder 订阅）不在这里——host（persistence/index）直接包 store.files.watchFolder。
 
-import type { Bytes, Store, ListContext, SyncState } from "../store/index.ts";
+import type { Bytes, Store } from "@internal/store";
 
-export interface PaperFile {
-  path: string;       // approot 相对路径，如 "papers/Wei 2011.pdf"
-  fileName: string;   // basename
-  folder: string;     // 所在文件夹（folder-tree 用），如 "papers"
-  size: number;
-  syncState: SyncState;   // store 解析好的 8-badge（residency ⟂ sync-status）
+/** 回收站/备份箱一项（local/cloud 双腿：cloudId=云端 item id，trashKey=本地缓存键；至少一腿）。 */
+export interface BinEntry {
+  key: string;                  // UI 列表 key（cloudId ?? trashKey）
+  cloudId: string | null;
+  trashKey: string | null;
+  name: string;                 // 显示名（已去 move-aside 时间戳）
 }
 
-/** 回收站一项（去掉 move-aside 时间戳后的显示名 + 云端 item id）。 */
-export interface TrashEntry { cloudId: string; name: string; }
-
 export interface Content {
-  /** 列 approot 下所有 PDF + 文件夹（local ∪ cloud 统一列举；离线/登出=纯本地，绝不返空）。complete=false → 云 walk 有子树失败/离线，别据此删缓存。 */
-  listTree(ctx: ListContext): Promise<{ files: PaperFile[]; folders: string[]; complete: boolean }>;
   /** 回收站列表（.trash 里的 PDF；name 已去 [时间戳]）。 */
-  listTrash(): Promise<TrashEntry[]>;
+  listTrash(): Promise<BinEntry[]>;
   /** 备份箱列表（.backup 里的 loser 字节；恢复/彻底删走通用 restore/purge）。 */
-  listBackup(): Promise<TrashEntry[]>;
-  /** 从回收站恢复到 targetPath（host 决定落点，如 papers/<name>）。 */
-  restore(cloudId: string, targetPath: string): Promise<void>;
+  listBackup(): Promise<BinEntry[]>;
+  /** 从回收站/备份箱恢复到 targetPath（host 决定落点，如 papers/<name>）。 */
+  restore(e: BinEntry, targetPath: string): Promise<void>;
   /** 永久删除（danger confirm 由 host 经 confirm 注入；store 强制）。 */
-  purge(cloudId: string, confirm: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>): Promise<void>;
+  purge(e: BinEntry, confirm: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>): Promise<void>;
   /** 清空回收站（本地+云端）。 */
   emptyTrash(): Promise<{ purged: number; failed: unknown[] }>;
   /** 留一份离线副本（确保已缓存，离线可读）。 */
@@ -34,56 +31,47 @@ export interface Content {
   offload(path: string): Promise<void>;
   /** 读 PDF 字节（store.file.open：本地有秒开 / 无则拉云 + 缓存）。 */
   read(path: string): Promise<Blob | null>;
-  /** 摄入：上传 PDF（新文件；store 红线 never-overwrite）。 */
+  /** 摄入：上传 PDF（新文件；store 红线 never-overwrite，撞名抛）。 */
   upload(path: string, bytes: Bytes | Blob): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
   /** 软删：move 到 .trash（store 红线 move-aside）。 */
   trash(path: string): Promise<void>;
-  /** 新建文件夹（完整 approot 路径）。idempotent。 */
+  /** 新建文件夹（完整 approot 路径）。idempotent，离线先本地登记、回线补建。 */
   ensureFolder(path: string): Promise<void>;
-  /** 删除**空**文件夹（store 强制非空拒删）。返 false=云端已无此夹（noop）。 */
-  deleteFolder(path: string): Promise<boolean>;
+  /** 删除**空**文件夹（store 强制非空拒删——非空抛错出 toast）。 */
+  deleteFolder(path: string): Promise<void>;
 }
 
-function baseName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
-function dirName(p: string): string { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); }
-
-type ContentStore = Pick<Store, "file" | "listAllItems" | "ensureFolder" | "deleteFolder" | "listTrash" | "listBackup" | "restore" | "purge" | "emptyTrash">;
-
 const stripStamp = (n: string): string => n.replace(/ \[[^\]]*\]$/, "");   // 去 move-aside 的 [yyyymmddhhmmss-guid]
+const baseName = (p: string): string => { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); };
 
-export function createContent(store: ContentStore): Content {
-  const raw = (path: string) => store.file(path, { isZip: false });
+export function createContent(store: Pick<Store, "file" | "files">): Content {
+  const existing = (path: string) => store.file(path, { isZip: false, mode: "existing" });
+  const toBin = (it: { cloudItemId: string | null; localKey: string | null; name: string }): BinEntry | null => {
+    const key = it.cloudItemId ?? it.localKey;
+    if (!key) return null;
+    return { key, cloudId: it.cloudItemId, trashKey: it.localKey, name: stripStamp(baseName(it.name)) };
+  };
+  const listBin = async (which: "listTrash" | "listBackup"): Promise<BinEntry[]> =>
+    (await store.files[which]()).map(toBin).filter((e): e is BinEntry => !!e && /\.pdf$/i.test(e.name));
   return {
-    async listTree(ctx) {
-      const { items, folders, complete } = await store.listAllItems(ctx);   // 统一列举：local ∪ cloud，离线/登出=纯本地
-      return {
-        files: items.map((it) => ({ path: it.path, fileName: baseName(it.path), folder: dirName(it.path), size: it.size ?? 0, syncState: it.syncState })),
-        folders, complete,
-      };
+    read: (path) => existing(path).open(),
+    async upload(path, bytes) { await store.file(path, { isZip: false, mode: "new" }).save(bytes); },   // 默认 tryPush:true；离线→ADR-0018 队列补推
+    async rename(oldPath, newPath) {
+      const r = await existing(oldPath).tryMove(newPath);
+      if (!r.ok) throw new Error(`同名已存在(${r.where === "cloud" ? "云端" : "本地"})`);
     },
-    read: (path) => raw(path).open(),
-    async upload(path, bytes) { await raw(path).save(bytes); },
-    async rename(oldPath, newPath) { await raw(oldPath).rename(newPath); },
-    async trash(path) { await raw(path).delete(); },
-    async ensureFolder(path) { await store.ensureFolder(path); },
-    deleteFolder: (path) => store.deleteFolder(path),
-    async listTrash() {
-      const items = await store.listTrash();
-      return items
-        .map((it) => ({ cloudId: it.id, name: stripStamp(baseName(it.path || it.name)) }))
-        .filter((e) => /\.pdf$/i.test(e.name));
+    async trash(path) { await existing(path).delete(); },
+    ensureFolder: (path) => store.files.ensureFolder(path),
+    deleteFolder: (path) => store.files.deleteFolder(path),
+    listTrash: () => listBin("listTrash"),
+    listBackup: () => listBin("listBackup"),
+    async restore(e, targetPath) {
+      await store.files.restoreTrash({ fromCloud: !!e.cloudId, cloudItemId: e.cloudId, trashKey: e.trashKey, targetName: targetPath });
     },
-    async listBackup() {
-      const items = await store.listBackup();
-      return items
-        .map((it) => ({ cloudId: it.id, name: stripStamp(baseName(it.path || it.name)) }))
-        .filter((e) => /\.pdf$/i.test(e.name));
-    },
-    async restore(cloudId, targetPath) { await store.restore({ fromCloud: true, cloudItemId: cloudId, targetName: targetPath }); },
-    async purge(cloudId, confirm) { await store.purge({ cloudItemId: cloudId, confirm }); },
-    async emptyTrash() { const r = await store.emptyTrash({ scope: "both" }); return { purged: r.purged ?? 0, failed: r.failed ?? [] }; },
-    async keepOffline(path) { await raw(path).keepOffline(); },
-    offload(path) { return raw(path).offload(); },
+    async purge(e, confirm) { await store.files.purgeTrash({ cloudItemId: e.cloudId, trashKey: e.trashKey, confirm }); },
+    async emptyTrash() { const r = await store.files.emptyTrash({ scope: "both" }); return { purged: r.purged ?? 0, failed: r.failed ?? [] }; },
+    async keepOffline(path) { await existing(path).keepOffline(); },
+    offload: (path) => existing(path).offload(),
   };
 }

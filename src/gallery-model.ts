@@ -3,7 +3,7 @@
 // JRP 适配:无 local-session(PDF 是云镜像);item = 云 PDF 文件 ⊕ catalog 元数据(标题/docId/缓存态)。
 // **丢掉** WebPaint 的:加密、copy、ghost/cloud-gone 收敛(那是 store 域)、dirty-sync badge、多选。
 // 零 DOM / 零网络 / 零 store（仅 type-only 借 SyncState，运行时不拉 store）→ 可单测。
-import type { SyncState } from "./store/index.ts";
+import type { SyncState } from "@internal/store";
 
 // ── 路径代数(lift) ──────────────────────────────────────────────────────────
 export function pathFolder(name: string): string { const i = name.lastIndexOf("/"); return i < 0 ? "" : name.slice(0, i); }

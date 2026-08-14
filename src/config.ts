@@ -11,8 +11,13 @@ export const MSAL_URL = "./vendor/msal/msal-browser.min.js";   // vendored,相�
 // approot 内部布局
 export const PAPERS_FOLDER = "papers";          // PDF 平铺于此
 export const TRASH_FOLDER = "trash";
-// 新 catalog 用新文件名,**故意不碰旧 session.json**(新旧 app 共 approot 不打架;docId 身份变了无法迁旧位置)
-export const CATALOG_NAME = "catalog.json";
+// catalog collection 名（@internal/store 云端落 `.justreadpapers/catalog.json`，库自动加 .json）。
+// 旧引擎的 approot /catalog.json 是迁移源（见 persistence/catalog-v1-migration.ts）——只读不改不删，可回捞。
+// （更旧的 session.json 是内容哈希 docId 时代,身份变了无法迁,继续不碰。）
+export const CATALOG_NAME = "catalog";
+export const OLD_CATALOG_PATH = "catalog.json";   // 旧引擎 catalog 云端落点（v1 信封）
+export const APP_ID = "justreadpapers";           // store 命名空间（同 origin 兄弟 PWA 隔离红线）
+export const SETTINGS_NAME = "local-settings";    // 设备本地设置 collection（local-only 不上云）。旧 localStorage settings:* 键孤儿化不迁（低价值，重置）
 
 // valuable-save 节流("有价值的保存"理论)
 export const POSITION_DEBOUNCE_MS = 10_000;

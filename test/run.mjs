@@ -1,29 +1,11 @@
 // 测试入口:node test/run.mjs(node 24 strip-types 直跑导入的 .ts)。
 // 加新测试文件:在下面 import 一行即可。
+// 引擎测试已随库走（@internal/store 仓 npm test，297 件）——这里只剩 app 域。
 import "./valuable-save.test.ts";
 import "./viewer-geometry.test.ts";
 import "./catalog.test.ts";
-import "./local-head.test.ts";
-import "./safe-resolve.test.ts";
-import "./seal.test.ts";
-import "./push.test.ts";
-import "./freshness.test.ts";
-import "./delete.test.ts";
-import "./identity.test.ts";
-import "./trash.test.ts";
-import "./create-store.test.ts";
-import "./collection.test.ts";
-import "./collection-cache.test.ts";
-import "./offload.test.ts";
-import "./reconcile.test.ts";
-import "./encryption.test.ts";
-import "./crypto-container.test.ts";
-import "./cloud-sync.test.ts";
-import "./provider.test.ts";
-import "./settings.test.ts";
+import "./catalog-v1-migration.test.ts";
 import "./gallery-model.test.ts";
-import "./listing.test.ts";
-import "./upload-queue.test.ts";
 import { run } from "./_harness.ts";
 
 await run();

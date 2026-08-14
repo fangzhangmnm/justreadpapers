@@ -1,7 +1,7 @@
 import { test, eq } from "./_harness.ts";
 import { pathFolder, pathBasename, pathJoin, buildItems, sliceFolder, breadcrumb } from "../src/gallery-model.ts";
 import type { CatalogMeta } from "../src/gallery-model.ts";
-import type { SyncState } from "../src/store/index.ts";
+import type { SyncState } from "@internal/store";
 
 const f = (name: string, syncState: SyncState = "synced") => ({ name, path: "papers/" + name, syncState });
 

@@ -6,6 +6,7 @@ import { Viewer } from "./viewer.ts";
 import { Gallery } from "./gallery.ts";
 import type { Position } from "../domain/viewer-geometry.ts";
 import { persistence, settings, appUi, pwaShell, pushToast, withBusy, conflictUi, answerConflict, cloudCheckUi, skipToOffline, replayUi, answerReplay } from "../app-state.ts";
+import type { BinEntry } from "../persistence/index.ts";
 import { PAPERS_FOLDER, BUILD_ID } from "../config.ts";
 import { pathFolder, pathJoin } from "../gallery-model.ts";
 import type { GalleryItem } from "../gallery-model.ts";
@@ -52,20 +53,32 @@ export const App = defineComponent({
     function confirmAnswer(ok: boolean): void { confirmState.open = false; const r = _confirmResolve; _confirmResolve = null; if (r) r(ok); }
 
     // ── Gallery host：folder div 是窄接口展示组件，宿主在此喂数据 + 执行操作（碰 store）。──
+    // 列举 = 网盘模型（watchGallery 订阅当前夹）：立即本地帧（offline-first，未登录/离线也有本地论文）、
+    //   云端到了同一 cb 再闪；本夹任何写（上传/改名/删）watcher 即时重推，不再手动 refresh。
+    // galFolders = **累积**文件夹集（当前层以最新帧为准，别的层保留）——喂「移动到…」picker 和空夹真相源。
     const galItems = ref<GalleryItem[]>([]);
     const galFolders = ref<string[]>([]);
     const galLoading = ref(false);
     const galSignedIn = ref(false);
     const galAccount = ref("");   // 已登录账号显示名（喂 Gallery 账号 popup）
-    const galTrash = ref<{ cloudId: string; name: string }[]>([]);    // 回收站项（懒加载）
-    const galBackup = ref<{ cloudId: string; name: string }[]>([]);   // 备份箱项（懒加载）
-    const galCurrentFolder = ref("");   // Gallery 当前层（@folderchange 汇报）；拖拽上传落点用
-    async function refreshGallery(): Promise<void> {
-      // offline-first（红线：无账号可用）：未登录/离线也刷——listGallery 走统一列举返本地论文，登出不再清空。
+    const galTrash = ref<BinEntry[]>([]);    // 回收站项（懒加载）
+    const galBackup = ref<BinEntry[]>([]);   // 备份箱项（懒加载）
+    const galCurrentFolder = ref("");   // Gallery 当前层（@folderchange 汇报）；拖拽上传落点 + 订阅目标
+    const knownFolders = new Set<string>();
+    let unwatchGal: (() => void) | null = null;
+    function watchGalFolder(folder: string): void {
+      unwatchGal?.();
       galLoading.value = true;
-      try { const g = await persistence().listGallery(); galItems.value = g.items; galFolders.value = g.folders; }
-      finally { galLoading.value = false; }
+      unwatchGal = persistence().watchGallery(folder, (snap) => {
+        galLoading.value = false;
+        galItems.value = snap.files;
+        const parentOf = (f: string): string => { const i = f.lastIndexOf("/"); return i < 0 ? "" : f.slice(0, i); };
+        for (const f of [...knownFolders]) if (parentOf(f) === folder && !snap.folders.includes(f)) knownFolders.delete(f);
+        for (const f of snap.folders) knownFolders.add(f);
+        galFolders.value = [...knownFolders].sort();
+      });
     }
+    function refreshGallery(): void { watchGalFolder(galCurrentFolder.value); }   // 刷新 = 退订重订（触发新一次云端帧）
     async function onGalLoadBin(kind: "trash" | "backup"): Promise<void> {   // 进恢复箱视图才拉（不拖慢每次开库）
       if (!galSignedIn.value) { galTrash.value = []; galBackup.value = []; return; }
       galLoading.value = true;
@@ -93,11 +106,11 @@ export const App = defineComponent({
         showToast("已移除本地缓存");
       }, "", "移除缓存失败");
     }
-    function onGalRestore(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {
-      void withGalleryBusy(async () => { await persistence().content.restore(e.cloudId, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadBin(e.kind); }, "已恢复", "恢复失败");
+    function onGalRestore(e: BinEntry & { kind: "trash" | "backup" }): void {
+      void withGalleryBusy(async () => { await persistence().content.restore(e, `${PAPERS_FOLDER}/${e.name}`); await onGalLoadBin(e.kind); }, "已恢复", "恢复失败");
     }
-    function onGalPurge(e: { cloudId: string; name: string; kind: "trash" | "backup" }): void {
-      void withGalleryBusy(async () => { await persistence().content.purge(e.cloudId, appConfirm); await onGalLoadBin(e.kind); }, "", "删除失败");
+    function onGalPurge(e: BinEntry & { kind: "trash" | "backup" }): void {
+      void withGalleryBusy(async () => { await persistence().content.purge(e, appConfirm); await onGalLoadBin(e.kind); }, "", "删除失败");
     }
     async function onGalEmptyTrash(): Promise<void> {
       if (!(await appConfirm({ title: "清空回收站", body: "彻底删除全部，不可恢复", danger: true }))) return;
@@ -105,7 +118,8 @@ export const App = defineComponent({
     }
     async function withGalleryBusy(fn: () => Promise<void>, okMsg: string, failMsg: string): Promise<void> {
       galLoading.value = true;
-      try { await fn(); if (okMsg) showToast(okMsg); } catch { showToast(failMsg); } finally { await refreshGallery(); }
+      // 不再手动 refresh：store 写操作会经 watcher 即时重推本地帧（网盘模型）。
+      try { await fn(); if (okMsg) showToast(okMsg); } catch { showToast(failMsg); } finally { galLoading.value = false; }
     }
     function onGalRename(p: { item: GalleryItem; name: string }): void {
       const base = /\.pdf$/i.test(p.name) ? p.name : p.name + ".pdf";   // .pdf 是 JRP-specific，宿主补
@@ -144,7 +158,11 @@ export const App = defineComponent({
         showToast(failed.length ? `上传 ${ok} 个，${failed.length} 个失败(同名?)` : `已上传 ${ok} 个`);
       }, "", "上传失败(同名/未登录/离线?)").then(() => { if (last) void openPaper(last); });
     }
-    function onGalFolderChange(folder: string): void { galCurrentFolder.value = folder; }
+    function onGalFolderChange(folder: string): void {
+      const changed = galCurrentFolder.value !== folder || !unwatchGal;
+      galCurrentFolder.value = folder;
+      if (changed) watchGalFolder(folder);   // 换层 = 换订阅目标（内存只放当前夹）
+    }
 
     // 拖拽上传(抄旧版 spec)：整窗监听、**任何模式都能拖**(阅读时也行)，不只开图库时。
     // dragenter 计数防抖(进子元素也 fire dragleave)；dragover 必 preventDefault 否则不触发 drop。
@@ -180,7 +198,7 @@ export const App = defineComponent({
         "已删除空文件夹", "删除失败(文件夹非空?)");
     }
 
-    const themeMode = ref(settings().get("theme") || "auto");
+    const themeMode = ref("auto");   // 真值等 settings.init（boot 门）后回填——init 前 get 恒 null
     function resolveTheme(m: string): string { return m === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day") : m; }
     function applyTheme(): void { document.documentElement.dataset.theme = resolveTheme(themeMode.value); }
     function cycleTheme(): void {
@@ -230,6 +248,7 @@ export const App = defineComponent({
         cat.touch(key);
         currentDocId.value = key; title.value = item.title; pos.value = null; outline.value = [];
         currentPaperFolder.value = pathFolder(item.name);   // 阅读模式拖拽 → 落当前论文同夹
+        persistence().setActivePaper(item.path);            // 正在读的论文：store cloud-gone 去抖绝不碰它
         const restore = cat.get(key)?.position ?? null;
         const t3 = performance.now();
         await v()?.loadBlob(blob, { key, pos: restore });
@@ -249,7 +268,12 @@ export const App = defineComponent({
     }
 
     onMounted(async () => {
-      applyTheme();
+      applyTheme();   // 先按默认 auto 画一帧，settings 就位后重放（IDB hydrate 快，闪主题概率极低）
+      try {
+        await persistence().settings.init();   // boot 门：init 前 set 会抛（库故意）——所有设置读写在此之后
+        themeMode.value = settings().get("theme") || "auto";
+        applyTheme();
+      } catch { /* 设置库打不开 → 一律默认值（可用性优先） */ }
       // 拖拽上传整窗常驻(根组件不卸载,无需 remove)。
       window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver);
       window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
@@ -279,7 +303,7 @@ export const App = defineComponent({
         galSignedIn.value = !!(st && st.signedIn);
         galAccount.value = acctName(st);
         void refreshGallery();
-        if (st && st.signedIn) void persistence().syncOfflineUploads();   // 登录成功 → 补推离线新上传（ADR-0018 ask；in-flight 守卫防重）
+        if (st && st.signedIn) { void persistence().syncOfflineUploads(); void persistence().migrateLegacyCatalog(); }   // 登录成功 → 统一队列重放（ADR-0018 ask；in-flight 守卫防重）+ 旧 catalog 迁移兜底（marker 幂等）
         // 登录态到达 → 后台云端 catalog 同步（不遮罩、不重开；论文/图库已由 ① 决定）。
         if (st && st.signedIn && !cloudSynced) { cloudSynced = true; void doResume(false); }
       });
@@ -287,7 +311,7 @@ export const App = defineComponent({
         const st = await auth.initAuth();
         galSignedIn.value = !!st.signedIn;
         galAccount.value = acctName(st);
-        if (st.signedIn) { cloudSynced = true; void persistence().syncOfflineUploads(); }   // 已登录：① 即云端续读；补推离线新上传（ADR-0018）
+        if (st.signedIn) { cloudSynced = true; void persistence().syncOfflineUploads(); void persistence().migrateLegacyCatalog(); }   // 已登录：① 即云端续读；统一队列重放 + 旧 catalog 迁移兜底
         await doResume(true);                   // 唯一带遮罩的续读；未登录/probing 也在此优雅落地
       } catch { await doResume(true); }
       const flush = (): void => { persistence().save.flushKeepalive(); };
