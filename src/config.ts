@@ -4,7 +4,7 @@
 //   (manual,等真要在 /dev/ 测 auth 时做)。
 
 export const CLIENT_ID = "8b5063a4-6fd4-40d0-8973-fb6388a6db24";
-export const AUTHORITY = "https://login.microsoftonline.com/common";
+export const AUTHORITY = "https://login.microsoftonline.com/consumers";
 export const SCOPES = ["Files.ReadWrite.AppFolder", "offline_access"];
 export const MSAL_URL = "./vendor/msal/msal-browser.min.js";   // vendored,相对 baseURI(/ 与 /dev/ 都对)
 
