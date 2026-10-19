@@ -14,4 +14,5 @@ pdf.js 论文阅读器：手机端随手存网盘 → 各端（含 Quest、4K �
 - 正式版 `https://papers.weebpaint.com/`（仍是 05-27 旧 JS app）、开发版 `/dev/`（TS 重写）；仓库 Pages 挂自定义域名（Actions 部署，无 CNAME 文件），强制 HTTPS，证书只管 `papers`（到 2027-01-16）。旧 `fangzhangmnm.github.io/justreadpapers/`（含 `/dev/`）301 到这里。user 2026-10-18「jrp: 域名改成papers.weebpaint.com/dev/」；家族背景与搬家清单 = 家族根 `ai-docs/20261011-family-domain-subdomains.md`。
 - 新地址 = 新箱子：旧 github.io 箱子的本机数据不会带过来（PDF 与阅读位置都在 OneDrive，登录后回来；本机缓存的 PDF 要重下）。
 - Azure SPA 回调要有 `https://papers.weebpaint.com/`、`/dev/`；旧 github.io 两条保留给旧主屏图标。
+- 正式版 authority 2026-10-18 才从 `/common` 改成 `/consumers`（prod 66c54c9，离线壳缓存 v21-2026-10-18；user「修，推Prod」）；main 早在 527bc72 就是 `/consumers`。线上无头验：点登录第一跳 = `login.microsoftonline.com/consumers/…/authorize`、回调 `https://papers.weebpaint.com/`、落到 login.live.com 无报错。**回调地址注册没法这样验**：走 `/consumers` 时连一条没注册的对照地址也照样被放行到 login.live.com，微软要等登录完才核对。edited by Claude Opus 5.5 2026-10-18
 - 旧正式版主屏图标：离线壳是缓存优先、不重建跳转响应（没有 MoonSinger W-21 那个报错），按代码推断（未真机验）会继续打开旧箱子里缓存的旧版。`/dev/` 本来就没有离线壳。edited by Claude Opus 5.5 2026-10-18
