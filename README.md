@@ -2,7 +2,7 @@
 
 > 输入 URL → 立刻回到上次那篇论文的那一页。
 
-**🔗 https://fangzhangmnm.github.io/justreadpapers/**
+**🔗 https://papers.weebpaint.com/**（开发版 `/dev/`；2026-10-18 起，旧 github.io 地址 301 过来）
 
 PDF 论文阅读 PWA。OneDrive `approot` 沙盒做存储,session.json 是唯一 asset,PDF 是可丢弃 cache。
 
@@ -30,7 +30,7 @@ PDF 论文阅读 PWA。OneDrive `approot` 沙盒做存储,session.json 是唯一
 | Name | `justreadpapers` |
 | Supported account types | **Personal Microsoft accounts only** (或 *Accounts in any org directory + personal* 也行) |
 | Redirect URI 平台 | **Single-page application (SPA)** |
-| Redirect URI 值 | `https://fangzhangmnm.github.io/justreadpapers/` |
+| Redirect URI 值 | `https://papers.weebpaint.com/` 和 `https://papers.weebpaint.com/dev/` |
 
 注册完之后:
 
@@ -52,7 +52,7 @@ PDF 论文阅读 PWA。OneDrive `approot` 沙盒做存储,session.json 是唯一
 | Repo name | `justreadpapers` |
 | Visibility | **Public** (GH Pages 免费层要求) |
 
-push 完之后:**Settings → Pages** → Source: **Deploy from a branch**,Branch: **main / `/` (root)**。等 1-2 分钟,`https://fangzhangmnm.github.io/justreadpapers/` 就活了。
+push 完之后:**Settings → Pages** → Source: **Deploy from a branch**,Branch: **main / `/` (root)**。等 1-2 分钟,`https://fangzhangmnm.github.io/justreadpapers/` 就活了。（现状：Source = GitHub Actions，挂自定义域名 `papers.weebpaint.com`，见 CLAUDE.md「地址」节。）
 
 ## 本地跑
 

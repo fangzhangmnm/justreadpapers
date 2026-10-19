@@ -1,7 +1,7 @@
 # JRP 真机验证清单（release-to-prod 前）
 
 > as-of 2026-06-28 · 本 session 海量 store 改动 + 此前全部**未真机验**。prod（提升 /dev/→/）前必须真机过一遍。
-> 在 `/dev/`（fangzhangmnm.github.io/justreadpapers/dev/）上测。每条：通过打 ✓，坏了记现象。
+> 在 `/dev/`（papers.weebpaint.com/dev/；2026-10-18 前是 fangzhangmnm.github.io/justreadpapers/dev/）上测。每条：通过打 ✓，坏了记现象。
 
 ## A. Boot / resume（产品心脏）
 - [ ] **新设备/未登录**：打开 /dev/ → 不卡转圈 → 进得了图库 → 能点登录（0caf386 修的「未登录卡锁屏」）。

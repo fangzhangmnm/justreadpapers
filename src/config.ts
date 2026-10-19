@@ -1,7 +1,6 @@
 // app 配置常量(从 ARCHIVE/config.js 搬,TS 化)。Azure 注册 / approot 布局 / 节流 / 锚点。
-// ⚠ Azure redirect URI:旧注册只有 .../justreadpapers/ + localhost。**/dev/ 要能登录需在
-//   entra.microsoft.com 给这个 clientId 加 redirect URI https://fangzhangmnm.github.io/justreadpapers/dev/**
-//   (manual,等真要在 /dev/ 测 auth 时做)。
+// Azure redirect URI = store 按 location.origin + location.pathname 现算;注册里要有
+//   https://papers.weebpaint.com/ 和 /dev/(2026-10-18 搬家,见 CLAUDE.md「地址」节)。
 
 export const CLIENT_ID = "8b5063a4-6fd4-40d0-8973-fb6388a6db24";
 export const AUTHORITY = "https://login.microsoftonline.com/consumers";
